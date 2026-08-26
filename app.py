@@ -64,7 +64,7 @@ st.set_page_config(page_title="台股AI量化與當沖分析儀表板", layout="
 st.title("📈 台股 AI 量化分析與當沖飆股診斷儀表板")
 
 # ------------------------------------------------------------------------------
-# 2. 側邊欄設定 (支援動態記憶與快速帶入)
+# 2. 側邊欄設定 (支援動態記憶、新增與刪除自選股)
 # ------------------------------------------------------------------------------
 st.sidebar.header("🔍 個股查詢與自選股管理")
 
@@ -72,19 +72,19 @@ st.sidebar.header("🔍 個股查詢與自選股管理")
 if "user_watchlist" not in st.session_state:
   st.session_state.user_watchlist = ["2330.TW", "2317.TW"]
 
-# 🔥 關鍵：建立一個專門儲存目前要查詢股票的變數
 if "current_ticker" not in st.session_state:
   st.session_state.current_ticker = "2330.TW"
 
-# 自選股管理小工具
+# ⭐ 自選股管理小工具 (新增與刪除)
 with st.sidebar.expander("⭐ 管理我的自選股"):
+  # 1. 新增功能
   new_stock = st.text_input(
       "輸入想新增的代號 (例如: 2454.TW)",
       placeholder="輸入後按新增",
       key="new_stock_input",
   )
   col_add, col_clear = st.columns(2)
-  if col_add.button("➕ 新增到自選", use_container_width=True):
+  if col_add.button("➕ 新增", use_container_width=True):
     if new_stock:
       formatted_stock = new_stock.strip().upper()
       if formatted_stock not in st.session_state.user_watchlist:
@@ -92,19 +92,30 @@ with st.sidebar.expander("⭐ 管理我的自選股"):
         st.success(f"已新增 {formatted_stock}")
         st.rerun()
       else:
-        st.warning("清單中已經有這檔股票囉！")
+        st.warning("清單中已存在！")
 
-  if col_clear.button("🗑️ 清空清單", use_container_width=True):
+  if col_clear.button("🗑️ 清空全部", use_container_width=True):
     st.session_state.user_watchlist = []
     st.rerun()
 
-  st.write("目前自選股：", st.session_state.user_watchlist)
+  st.markdown("---")
+  
+  # 2. 刪除功能 (選擇要移除的股票)
+  if len(st.session_state.user_watchlist) > 0:
+    stock_to_remove = st.selectbox("選擇要刪除的股票", st.session_state.user_watchlist, key="remove_select")
+    if st.button("❌ 從自選股移除", use_container_width=True):
+      if stock_to_remove in st.session_state.user_watchlist:
+        st.session_state.user_watchlist.remove(stock_to_remove)
+        st.success(f"已移除 {stock_to_remove}")
+        st.rerun()
+  else:
+    st.info("目前自選股為空")
 
+# 查詢模式切換
 mode = st.sidebar.radio("選擇查詢方式", ["手動輸入代號", "⭐ 從自選股選擇"])
 
 if mode == "⭐ 從自選股選擇":
   if len(st.session_state.user_watchlist) > 0:
-    # 讓 selectbox 預設指向目前的 current_ticker（如果有的話）
     try:
       default_idx = st.session_state.user_watchlist.index(
           st.session_state.current_ticker
@@ -122,7 +133,6 @@ if mode == "⭐ 從自選股選擇":
         "請輸入股票代碼", value=st.session_state.current_ticker
     )
 else:
-  # 手動輸入框
   input_ticker = st.sidebar.text_input(
       "請輸入股票代碼 (台股請加 .TW 或 .TWO)",
       value=st.session_state.current_ticker,
@@ -130,7 +140,6 @@ else:
   if input_ticker:
     st.session_state.current_ticker = input_ticker.strip().upper()
 
-# 將最終要查詢的代號指定給 ticker 變數
 ticker = st.session_state.current_ticker
 # ------------------------------------------------------------------------------
 # 側邊欄的日期選擇設定 (請確保這段有放在側邊欄的結尾、主程式的上方)

@@ -402,14 +402,14 @@ if ticker:
     )
 
 # ------------------------------------------------------------------------------
-# 7. ⚡ 桌面股池當沖飆股自動掃描器 (具備記憶功能，切換頁面不跳掉)
+# 7. ⚡ 全市場當沖飆股自動掃描器 (支援本機與雲端通用，具備記憶與快速載入功能)
 # ------------------------------------------------------------------------------
 st.markdown("---")
 with st.expander(
     "⚡ 點擊展開：全市場盤後當沖飆股自動掃描器 (50元以下 / 記憶不跳掉)"
 ):
   st.write(
-      "這項功能會自動讀取桌面的 `stock_pool.txt` 股池，幫您篩選出**股價 50"
+      "這項功能會自動讀取 `stock_pool.txt` 股池，幫您篩選出**股價 50"
       " 元以內**的強勢當沖標的。掃描結果會被記憶，切換其他股票時不會消失。"
   )
 
@@ -419,12 +419,13 @@ with st.expander(
 
   # 2. 掃描按鈕
   if st.button("🚀 開始掃描全市場低價當沖強勢股", use_container_width=True):
-    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-    file_path = os.path.join(desktop_path, "stock_pool.txt")
+    # 改用相對路徑，本機與雲端（GitHub）皆可通用
+    file_path = "stock_pool.txt"
 
     if not os.path.exists(file_path):
       st.error(
-          "❌ 找不到桌面的 stock_pool.txt 檔案！請先執行過爬蟲匯出股池。"
+          "❌ 找不到 stock_pool.txt 檔案！請確保該檔案已與 app.py 放在同個資料夾"
+          "下。"
       )
     else:
       with open(file_path, "r", encoding="utf-8") as f:

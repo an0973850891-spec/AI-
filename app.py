@@ -8,21 +8,12 @@ import streamlit as st
 import yfinance as yf
 
 # ------------------------------------------------------------------------------
-# 0. 輔助函數：取得股票中文名稱 (升級版：支援完整中文對照)
+# 0. 輔助函數：取得股票中文名稱 (已擴充常看個股，避免抓不到變雙代號)
 # ------------------------------------------------------------------------------
 @st.cache_data(ttl=3600)
 def get_stock_name(ticker_code):
-    # 常見台股中英文對照表（您可以隨時把常看的股票加進來）
     common_names = {
-        "2305.TW": "全友",
-        "2491.TW": "吉祥全",
-        "2489.TW": "瑞軒",
-        "1711.TW": "永光",
-        "2302.TW": "麗正",
-        "1608.TW": "華榮",
-        "2342.TW": "茂矽",
-        "2367.TW": "耀華",
-        "2340.TW": "台亞",
+        "2408.TW": "南亞科",
         "2330.TW": "台積電",
         "2317.TW": "鴻海",
         "2454.TW": "聯發科",
@@ -37,25 +28,26 @@ def get_stock_name(ticker_code):
         "2609.TW": "陽明",
         "3008.TW": "大立光",
         "8069.TWO": "元太",
+        "6584.TWO": "南俊國際",
+        "6229.TWO": "研通",# 依需求補充
     }
     
-    # 移除空白並確保格式正確
-    clean_code = ticker_code.strip()
+    clean_code = ticker_code.strip().upper()
     if clean_code in common_names:
         return common_names[clean_code]
     
-    # 如果字典沒有，嘗試從桌面證交所原始檔案中尋找中文名稱
+    # 嘗試用 yfinance 抓取名稱
     try:
-        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-        file_path = os.path.join(desktop_path, "stock_pool.txt")
-        if os.path.exists(file_path):
-            # 這裡可以依需求擴充，若直接顯示代號亦可
-            pass
+        t = yf.Ticker(clean_code)
+        info = t.info
+        name = info.get("longName") or info.get("shortName")
+        # 如果抓到的名稱包含英文字母或微軟/Yahoo預設垃圾字串，乾脆回傳空字串避免顯示難看的英文
+        if name and not all(ord(c) < 128 for c in name): # 簡單檢查是否有中文字元
+            return name
     except:
         pass
         
-    return ticker_code # 找不到就回傳原本代號
-
+    return "" # 🔥 關鍵：如果真的抓不到中文，回傳空白，這樣畫面就不會出現醜醜的重複代號！
 
 # ------------------------------------------------------------------------------
 # 1. 頁面基本設定
@@ -149,6 +141,20 @@ start_date = end_date - datetime.timedelta(days=180)
 
 start_input = st.sidebar.date_input("開始日期", start_date)
 end_input = st.sidebar.date_input("結束日期", end_date)
+# --------------------------------------------------------------------------
+# 💡 新增：抓取當日分時走勢數據 (1分鐘 K 線，最近 1 天)
+# --------------------------------------------------------------------------
+try:
+  df_intraday = yf.download(
+      ticker,
+      period="1d",
+      interval="1m",
+      multi_level_index=False,
+      progress=False,
+      threads=False,
+  )
+except:
+  df_intraday = pd.DataFrame()
 # ------------------------------------------------------------------------------
 # 3. 主資料載入與指標計算
 # ------------------------------------------------------------------------------
@@ -242,6 +248,54 @@ if ticker:
     col2.metric("日振幅", f"{latest_amp:.2f} %")
     col3.metric("爆量倍數", f"{latest_vol_ratio:.2f} 倍")
     col4.metric("成交量", f"{int(latest['Volume']/1000):,} 張")
+    # --------------------------------------------------------------------------
+    # 📈 當日分時走勢圖 (已優化 Y 軸，讓起伏超級明顯)
+    # --------------------------------------------------------------------------
+    st.markdown(f"### ⚡ 當日走勢圖 (分時線)：{ticker} {stock_display_name}")
+
+    if not df_intraday.empty:
+      # 找出當天最高價與最低價，並保留一點上下邊距，讓起伏非常明顯
+      min_price = float(df_intraday["Low"].min())
+      max_price = float(df_intraday["High"].max())
+
+# 預留上下 0.5% ~ 1% 的空間，讓圖表不會貼齊邊框
+      padding = (max_price - min_price) * 0.1
+      if padding == 0:
+        padding = 1.0  # 避免當天完全沒波動時區間為 0
+
+      y_min = min_price - padding
+      y_max = max_price + padding
+
+      fig_intra = go.Figure()
+      fig_intra.add_trace(
+          go.Scatter(
+              x=df_intraday.index,
+              y=df_intraday["Close"],
+              mode="lines",
+              name="分時走勢",
+              line=dict(color="#2962FF", width=2),
+              fill="tozeroy",
+              fillcolor="rgba(41, 98, 255, 0.1)",
+          )
+      )
+
+      # 🔥 關鍵：手動指定 yaxis 的 range，強制把畫面放大鎖定在個股當天的價格區間
+      fig_intra.update_layout(
+          height=350,
+          margin=dict(l=10, r=10, t=20, b=10),
+          xaxis_title="時間",
+          yaxis_title="價格",
+          xaxis_rangeslider_visible=False,
+          yaxis=dict(range=[y_min, y_max]),  # 強制鎖定上下限，徹底擺脫從 0 開始的悲劇！
+      )
+      st.plotly_chart(fig_intra, use_container_width=True)
+    else:
+      st.info(
+          "💤 目前非交易時間或無當日分時數據（Yahoo Finance"
+          " 盤後可能無法取得分時線）。"
+      )
+
+    st.markdown("---")  # 加個分隔線
 
     # --------------------------------------------------------------------------
     # 5. Plotly 互動式圖表

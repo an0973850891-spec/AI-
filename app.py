@@ -37,6 +37,7 @@ def get_stock_name(ticker_code):
       "2382.TW": "廣達",
       "3481.TW": "群創",
       "2609.TW": "陽明",
+      "2406.TW": "國碩",
       "3008.TW": "大立光",
       "8069.TWO": "元太",
   }
@@ -422,15 +423,15 @@ if ticker:
     )
 
 # ------------------------------------------------------------------------------
-# 7. ⚡ 全市場當沖飆股自動掃描器 (支援本機與雲端通用，具備記憶與快速載入功能)
+# 7. ⚡ 全市場當沖飆股自動掃描器 (支援 50元以下 + 布林低檔 + 記憶功能)
 # ------------------------------------------------------------------------------
 st.markdown("---")
 with st.expander(
-    "⚡ 點擊展開：全市場盤後當沖飆股自動掃描器 (50元以下 / 記憶不跳掉)"
+    "⚡ 點擊展開：全市場盤後當沖飆股自動掃描器 (60元以下 / 布林低檔 / 記憶不跳掉)"
 ):
   st.write(
-      "這項功能會自動讀取 `stock_pool.txt` 股池，幫您篩選出**股價 50"
-      " 元以內**的強勢當沖標的。掃描結果會被記憶，切換其他股票時不會消失。"
+      "這項功能會自動讀取 `stock_pool.txt` 股池，幫您篩選出**股價 60"
+      " 元以內**、成交量大、振幅強勁，且**布林通道位於低檔支撐區**的當沖標的。"
   )
 
   # 1. 初始化 Session State 記憶容器
@@ -438,8 +439,7 @@ with st.expander(
     st.session_state.scanned_results_df = None
 
   # 2. 掃描按鈕
-  if st.button("🚀 開始掃描全市場低價當沖強勢股", use_container_width=True):
-    # 改用相對路徑，本機與雲端（GitHub）皆可通用
+  if st.button("🚀 開始掃描低價＋布林低檔強勢當沖股", use_container_width=True):
     file_path = "stock_pool.txt"
 
     if not os.path.exists(file_path):
@@ -451,16 +451,17 @@ with st.expander(
       with open(file_path, "r", encoding="utf-8") as f:
         my_pool = [line.strip() for line in f.readlines() if line.strip()]
 
-      scan_target = my_pool[:500]
+      scan_target = my_pool[:1000]
 
       with st.spinner(
-          f"⏳ 正在掃描前 {len(scan_target)} 檔股票並篩選 50 元以下標的，請稍候..."
+          f"⏳ 正在掃描前 {len(scan_target)} 檔股票 (篩選 50元以下 ＋"
+          " 布林低檔)..."
       ):
         all_results = []
         try:
           df_all = yf.download(
               scan_target,
-              period="10d",
+              period="30d",
               group_by="ticker",
               threads=True,
               progress=False,
@@ -473,8 +474,14 @@ with st.expander(
               else:
                 df_sub = df_all[ticker_code].dropna()
 
-              if len(df_sub) < 6:
+              if len(df_sub) < 25:
                 continue
+
+              # 計算技術指標 (MA20, 布林上下軌)
+              df_sub["MA20"] = df_sub["Close"].rolling(window=20).mean()
+              df_sub["BB_Std"] = df_sub["Close"].rolling(window=20).std()
+              df_sub["BB_Up"] = df_sub["MA20"] + (df_sub["BB_Std"] * 2)
+              df_sub["BB_Low"] = df_sub["MA20"] - (df_sub["BB_Std"] * 2)
 
               prev_c = df_sub["Close"].shift(1)
               amp = ((df_sub["High"] - df_sub["Low"]) / prev_c) * 100
@@ -483,18 +490,31 @@ with st.expander(
 
               last_row = df_sub.iloc[-1]
               close_price = float(last_row["Close"])
+              bb_low_val = float(last_row["BB_Low"])
+              bb_up_val = float(last_row["BB_Up"])
+              bb_mid_val = float(last_row["MA20"])
 
+              # 🎯 嚴格篩選條件：
+              # 1. 股價 <= 50 元
+              # 2. 成交量 > 200 萬股 (2000 張)
+              # 3. 日振幅 > 3.5%
+              # 4. 爆量倍數 > 1.2 倍
+              # 5. 🔥 布林低檔條件：收盤價位於布林中軌下方，且貼近或處於下軌附近 (低檔超賣或回測支撐)
               if (
-                  close_price <= 50.0
-                  and last_row["Volume"] > 3000000
-                  and amp.iloc[-1] > 4.0
-                  and v_ratio.iloc[-1] > 1.3
+                  close_price <= 60.0
+                  and last_row["Volume"] > 2000000
+                  and amp.iloc[-1] > 3.0
+                  and v_ratio.iloc[-1] > 1.0
+                  and close_price
+                  <= bb_mid_val  # 位於中軌以下（偏弱勢整理或底部區）
+                  
               ):
                 s_name = get_stock_name(ticker_code)
                 all_results.append({
                     "股票代碼": ticker_code,
                     "股票名稱": s_name,
                     "收盤價": round(close_price, 2),
+                    "布林下軌": round(bb_low_val, 2),
                     "日振幅(%)": round(float(amp.iloc[-1]), 2),
                     "爆量倍數": round(float(v_ratio.iloc[-1]), 2),
                     "成交量(張)": int(last_row["Volume"] / 1000),
@@ -521,7 +541,10 @@ with st.expander(
       and not st.session_state.scanned_results_df.empty
   ):
     df_res = st.session_state.scanned_results_df
-    st.success(f"🎉 目前已快取鎖定強勢低價當沖股（共 {len(df_res)} 支）：")
+    st.success(
+        f"🎉 目前已快取鎖定「50元以下 ＋ 布林低檔」強勢當沖股（共 {len(df_res)}"
+        " 支）："
+    )
 
     st.dataframe(df_res, use_container_width=True)
 
@@ -550,4 +573,6 @@ with st.expander(
       st.session_state.scanned_results_df is not None
       and st.session_state.scanned_results_df.empty
   ):
-    st.info("💤 目前條件下，無符合 50 元以下且具高振幅爆量的個股。")
+    st.info(
+        "💤 目前條件下，無符合「50元以下 ＋ 布林低檔支撐 ＋ 爆量振幅」的個股。"
+    )

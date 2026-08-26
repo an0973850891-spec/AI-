@@ -157,7 +157,7 @@ else:
     ), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name='MA20月線', line=dict(color='#ff9800', width=1.5)), row=1, col=1)
     
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker=dict(color='#4b4b4b')), row=2, col=1)
+    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker=dict(color='#ef5350')), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['K'], name='K值', line=dict(color='#ff5252', width=1.5)), row=3, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['D'], name='D值', line=dict(color='#00e676', width=1.5)), row=3, col=1)
     
@@ -218,7 +218,7 @@ else:
     ), row=1, col=1)
     
     # --- Row 2: 成交量 ---
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker=dict(color='#4b4b4b')), row=2, col=1)
+    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker=dict(color='#ef5350')), row=2, col=1)
     
     # --- Row 3: KD 指標 ---
     fig.add_trace(go.Scatter(x=df.index, y=df['K'], name='K值', line=dict(color='#ff5252', width=1.5)), row=3, col=1)

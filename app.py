@@ -8,46 +8,66 @@ import streamlit as st
 import yfinance as yf
 
 # ------------------------------------------------------------------------------
-# 0. 輔助函數：取得股票中文名稱 (已擴充常看個股，避免抓不到變雙代號)
+# 0. 輔助函數：取得股票中文名稱 (升級版：結合字典與檔案對應，雲端也不會空白)
 # ------------------------------------------------------------------------------
 @st.cache_data(ttl=3600)
 def get_stock_name(ticker_code):
-    common_names = {
-        "2408.TW": "南亞科",
-        "2330.TW": "台積電",
-        "2317.TW": "鴻海",
-        "2454.TW": "聯發科",
-        "2603.TW": "長榮",
-        "2308.TW": "台達電",
-        "2881.TW": "富邦金",
-        "2882.TW": "國泰金",
-        "1310.TW": "台玻",
-        "3231.TW": "緯創",
-        "2382.TW": "廣達",
-        "3481.TW": "群創",
-        "2609.TW": "陽明",
-        "3008.TW": "大立光",
-        "8069.TWO": "元太",
-        "6584.TWO": "南俊國際",
-        "6229.TWO": "研通",# 依需求補充
-    }
-    
-    clean_code = ticker_code.strip().upper()
-    if clean_code in common_names:
-        return common_names[clean_code]
-    
-    # 嘗試用 yfinance 抓取名稱
-    try:
-        t = yf.Ticker(clean_code)
-        info = t.info
-        name = info.get("longName") or info.get("shortName")
-        # 如果抓到的名稱包含英文字母或微軟/Yahoo預設垃圾字串，乾脆回傳空字串避免顯示難看的英文
-        if name and not all(ord(c) < 128 for c in name): # 簡單檢查是否有中文字元
-            return name
-    except:
-        pass
-        
-    return "" # 🔥 關鍵：如果真的抓不到中文，回傳空白，這樣畫面就不會出現醜醜的重複代號！
+  # 1. 內建常用低價強勢股中文對照表
+  common_names = {
+      "1709.TW": "特用化學/鼎基等",  # 依實際調整
+      "2305.TW": "全友",
+      "2302.TW": "麗正",
+      "2340.TW": "台亞",
+      "2491.TW": "吉祥全",
+      "2342.TW": "茂矽",
+      "2489.TW": "瑞軒",
+      "1711.TW": "永光",
+      "1608.TW": "華榮",
+      "2367.TW": "耀華",
+      "2408.TW": "南亞科",
+      "2330.TW": "台積電",
+      "2317.TW": "鴻海",
+      "2454.TW": "聯發科",
+      "2603.TW": "長榮",
+      "2308.TW": "台達電",
+      "2881.TW": "富邦金",
+      "2882.TW": "國泰金",
+      "1310.TW": "台玻",
+      "3231.TW": "緯創",
+      "2382.TW": "廣達",
+      "3481.TW": "群創",
+      "2609.TW": "陽明",
+      "3008.TW": "大立光",
+      "8069.TWO": "元太",
+  }
+
+  clean_code = ticker_code.strip().upper()
+  if clean_code in common_names:
+    return common_names[clean_code]
+
+  # 2. 如果字典沒有，嘗試從同資料夾的 stock_pool.txt 尋找是否有中文對應
+  try:
+    if os.path.exists("stock_pool.txt"):
+      with open("stock_pool.txt", "r", encoding="utf-8") as f:
+        for line in f:
+          parts = line.strip().split()
+          if len(parts) >= 2 and parts[0].upper() == clean_code:
+            return parts[1]  # 假設您的 stock_pool.txt 格式包含名稱
+  except:
+    pass
+
+  # 3. 嘗試用 yfinance 抓取
+  try:
+    t = yf.Ticker(clean_code)
+    info = t.info
+    name = info.get("longName") or info.get("shortName")
+    if name:
+      return name
+  except:
+    pass
+
+  # 4. 如果以上都失敗，直接回傳股票代號本身（至少不會是空白一片！）
+  return clean_code
 
 # ------------------------------------------------------------------------------
 # 1. 頁面基本設定

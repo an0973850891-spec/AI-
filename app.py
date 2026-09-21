@@ -13,9 +13,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 初始化 Session State (記憶自選股清單) ---
+# --- 初始化 Session State (記憶自選股與目前主股票) ---
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = ["2330.TW", "2317.TW", "2454.TW", "00878.TW", "00881.TW"]
+
+if 'selected_watchlist' not in st.session_state:
+    st.session_state.selected_watchlist = ["2330.TW", "2317.TW"]
+
+if 'primary_ticker' not in st.session_state:
+    st.session_state.primary_ticker = "2330.TW"
 
 # --- 側邊欄：功能選單與設定 ---
 st.sidebar.header("🔍 查詢與自選股設定")
@@ -30,28 +36,49 @@ with col_btn:
 # 當按下新增按鈕時處理
 if add_clicked and new_ticker_input:
     clean_input = new_ticker_input.strip().upper()
+    # 智慧判斷後綴：如果使用者沒輸入 .TW 或 .TWO，預設先當作上市 .TW (也可以讓使用者手動加 .TWO)
     if not clean_input.endswith((".TW", ".TWO")):
         clean_input = f"{clean_input}.TW"
     
+    # 加入總清單
     if clean_input not in st.session_state.watchlist:
         st.session_state.watchlist.append(clean_input)
-        st.sidebar.success(f"已新增 {clean_input}")
-    else:
-        st.sidebar.warning(f"{clean_input} 已在清單中")
+    
+    # 自動加入多選勾選清單
+    if clean_input not in st.session_state.selected_watchlist:
+        st.session_state.selected_watchlist.append(clean_input)
+        
+    # 自動將主股票切換為剛新增這檔，實現右側畫面秒切！
+    st.session_state.primary_ticker = clean_input
+    st.sidebar.success(f"已新增並切換至 {clean_input}")
+    st.rerun() # 強制重新整理畫面
 
-# 2. 多選清單（直接聯動 session_state）
+# 2. 多選清單
 selected_tickers = st.sidebar.multiselect(
     "我的自選股清單 (可多選進行比較)",
     options=st.session_state.watchlist,
-    default=st.session_state.watchlist[:2] # 預設選前兩檔
+    default=st.session_state.selected_watchlist,
+    key="multiselect_box"
 )
+
+# 更新多選狀態
+st.session_state.selected_watchlist = selected_tickers
 
 # 確保自選清單不為空
 if not selected_tickers:
     selected_tickers = ["2330.TW"]
 
-# 主查詢單一股票
-primary_ticker = st.sidebar.selectbox("選擇要檢視詳細 K 線的主股票", options=selected_tickers, index=0)
+# 確保 primary_ticker 在目前勾選清單內，若不在則預設選第一檔
+if st.session_state.primary_ticker not in selected_tickers:
+    st.session_state.primary_ticker = selected_tickers[0]
+
+# 主查詢單一股票下拉選單
+primary_ticker = st.sidebar.selectbox(
+    "選擇要檢視詳細 K 線的主股票", 
+    options=selected_tickers, 
+    index=selected_tickers.index(st.session_state.primary_ticker) if st.session_state.primary_ticker in selected_tickers else 0
+)
+st.session_state.primary_ticker = primary_ticker
 
 # 時間區間選項
 period_option = st.sidebar.selectbox(
@@ -128,7 +155,7 @@ def load_multi_stock_data(symbols, period):
         return None
 
 # 載入主股票與多股比較資料
-with st.spinner("正在從 Yahoo 股市載入資料與計算指標..."):
+with st.spinner(f"正在從 Yahoo 股市載入 {primary_ticker} 資料與計算指標..."):
     df, stock_info = load_stock_data(primary_ticker, period_map[period_option])
     df_multi = load_multi_stock_data(selected_tickers, period_map[period_option])
 
@@ -136,7 +163,7 @@ with st.spinner("正在從 Yahoo 股市載入資料與計算指標..."):
 st.title("📊 台股盤後分析與技術指標系統")
 
 if df is None or df.empty:
-    st.error(f"找不到代號 `{primary_ticker}` 的資料或 Yahoo 股市連線逾時。請確認台股代號是否正確（例如上櫃 5351.TWO）。")
+    st.error(f"找不到代號 `{primary_ticker}` 的資料或 Yahoo 股市連線逾時。請確認台股代號是否正確（例如上櫃請輸入帶 `.TWO` 的完整代號，如 `5351.TWO`）。")
 else:
     # 1. 主股票即時摘要
     latest = df.iloc[-1]

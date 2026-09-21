@@ -13,27 +13,38 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- 初始化 Session State (記憶自選股清單) ---
+if 'watchlist' not in st.session_state:
+    st.session_state.watchlist = ["2330.TW", "2317.TW", "2454.TW", "00878.TW", "00881.TW"]
+
 # --- 側邊欄：功能選單與設定 ---
 st.sidebar.header("🔍 查詢與自選股設定")
 
-# 1. 常用熱門自選股清單
-default_watchlist = ["2330.TW", "2317.TW", "2454.TW", "00878.TW", "00881.TW"]
+# 1. 獨立的代號新增輸入框與按鈕
+col_input, col_btn = st.sidebar.columns([3, 1])
+with col_input:
+    new_ticker_input = st.text_input("新增自選代號", placeholder="例如: 5351, 2603", label_visibility="collapsed")
+with col_btn:
+    add_clicked = st.button("➕ 新增", use_container_width=True)
 
-# 讓使用者自選或輸入股票
+# 當按下新增按鈕時處理
+if add_clicked and new_ticker_input:
+    clean_input = new_ticker_input.strip().upper()
+    if not clean_input.endswith((".TW", ".TWO")):
+        clean_input = f"{clean_input}.TW"
+    
+    if clean_input not in st.session_state.watchlist:
+        st.session_state.watchlist.append(clean_input)
+        st.sidebar.success(f"已新增 {clean_input}")
+    else:
+        st.sidebar.warning(f"{clean_input} 已在清單中")
+
+# 2. 多選清單（直接聯動 session_state）
 selected_tickers = st.sidebar.multiselect(
     "我的自選股清單 (可多選進行比較)",
-    options=default_watchlist,
-    default=["2330.TW", "2317.TW"]
+    options=st.session_state.watchlist,
+    default=st.session_state.watchlist[:2] # 預設選前兩檔
 )
-
-# 允許使用者手動輸入代號加入
-custom_input = st.sidebar.text_input("新增自選股代號 (例如: 2603, 2308)", value="")
-if custom_input:
-    formatted_input = custom_input.strip().upper()
-    if not formatted_input.endswith((".TW", ".TWO")):
-        formatted_input = f"{formatted_input}.TW"
-    if formatted_input not in selected_tickers:
-        selected_tickers.append(formatted_input)
 
 # 確保自選清單不為空
 if not selected_tickers:
@@ -125,7 +136,7 @@ with st.spinner("正在從 Yahoo 股市載入資料與計算指標..."):
 st.title("📊 台股盤後分析與技術指標系統")
 
 if df is None or df.empty:
-    st.error(f"找不到代號 `{primary_ticker}` 的資料或 Yahoo 股市連線逾時。請確認台股代號是否正確。")
+    st.error(f"找不到代號 `{primary_ticker}` 的資料或 Yahoo 股市連線逾時。請確認台股代號是否正確（例如上櫃 5351.TWO）。")
 else:
     # 1. 主股票即時摘要
     latest = df.iloc[-1]
@@ -148,7 +159,6 @@ else:
     with tab1:
         st.subheader(f"{primary_ticker} 技術線圖 (K線 + 布林軌道 + 成交量 + OBV 雙線)")
         
-        # 建立 3 個子圖表：上圖(K線與布林)，中圖(成交量)，下圖(OBV 雙線)
         fig = make_subplots(
             rows=3, cols=1, 
             shared_xaxes=True, 
@@ -171,15 +181,9 @@ else:
         colors = ['#ef5350' if row['Close'] >= row['Open'] else '#26a69a' for index, row in df.iterrows()]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker_color=colors), row=2, col=1)
 
-        # 3. OBV 能量潮指標（雙線：OBV 本線與 OBV 9日均線）
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['OBV'], name='OBV 能量潮', 
-            line=dict(color='#ab63fa', width=1.5)
-        ), row=3, col=1)
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['OBV_MA9'], name='OBV 9日均線', 
-            line=dict(color='#ffa15a', width=1.2, dash='dot')
-        ), row=3, col=1)
+        # 3. OBV 雙線
+        fig.add_trace(go.Scatter(x=df.index, y=df['OBV'], name='OBV 能量潮', line=dict(color='#ab63fa', width=1.5)), row=3, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['OBV_MA9'], name='OBV 9日均線', line=dict(color='#ffa15a', width=1.2, dash='dot')), row=3, col=1)
 
         fig.update_layout(
             xaxis_rangeslider_visible=False,

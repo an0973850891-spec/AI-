@@ -171,7 +171,7 @@ else:
     elif "偏空" in short_signal or "空頭" in long_signal:
         advice = "防守為主：目前技術面呈現拉回或震盪偏空走勢，短期上檔逢壓。建議保持觀望，等待量能回穩、OBV突破均線後再行尋找介入機會。"
     elif "偏多" in short_signal:
-        advice = "短線彈升：短線雖有買盤回溫跡象，但中長線仍在打底或盤整。操作上宜短打因應，嚴設停利停損，不宜過度重倉歐能。"
+        advice = "短線彈升：短線雖有買盤回溫跡象，但中長線仍在打底或盤整。操作上宜短打因應，嚴設停利停損，不宜過度重倉。"
     else:
         advice = "🔍 **盤整觀望格局**：目前短中線指標交錯、方向不明確。建議靜待突破訊號（如帶量突破布林上軌或 OBV 翻揚向上）再擬定進場策略。"
 
@@ -182,7 +182,6 @@ else:
     col_light1.markdown(f"**短線燈號：** {short_signal}")
     col_light2.markdown(f"**中長線燈號：** {long_signal}")
 
-    # 新增：操作建議顯示區塊
     st.info(f"💡 **AI 操作建議**：{advice}")
 
     st.markdown("---")
@@ -233,9 +232,13 @@ else:
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- 數據明細表 ---
+    # --- 數據明細表 (將 OBV 數值轉換為「萬」單位，方便閱讀) ---
     st.subheader(f"📋 近期技術指標與交易數據明細")
     
+    df_table = df.copy()
+    df_table['OBV_Wan'] = (df_table['OBV'] / 10000).round(1)
+    df_table['OBV_MA9_Wan'] = (df_table['OBV_MA9'] / 10000).round(1)
+
     rename_dict = {
         'Open': '開盤',
         'High': '最高',
@@ -246,18 +249,16 @@ else:
         'MA20': '布林中軌(MA20)',
         'Upper': '布林上軌',
         'Lower': '布林下軌',
-        'OBV': 'OBV能量潮',
-        'OBV_MA9': 'OBV9日均線',
+        'OBV_Wan': 'OBV能量潮(萬)',
+        'OBV_MA9_Wan': 'OBV9日均線(萬)',
         'RSV': 'RSV(9日)'
     }
     
-    display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA10', 'MA20', 'Upper', 'Lower', 'OBV', 'OBV_MA9', 'RSV'] if c in df.columns]
-    df_display = df[display_cols].copy()
+    display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA10', 'MA20', 'Upper', 'Lower', 'OBV_Wan', 'OBV_MA9_Wan', 'RSV'] if c in df_table.columns]
+    df_display = df_table[display_cols].copy()
     
     if 'RSV' in df_display.columns:
         df_display['RSV'] = df_display['RSV'].round(2)
-    if 'OBV_MA9' in df_display.columns:
-        df_display['OBV_MA9'] = df_display['OBV_MA9'].round(0)
     if 'MA10' in df_display.columns:
         df_display['MA10'] = df_display['MA10'].round(2)
     if 'MA20' in df_display.columns:

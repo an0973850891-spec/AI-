@@ -85,13 +85,13 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🚀 專業進階選股掃描器")
 st.sidebar.markdown("""
 **篩選條件：**
-1. 🌊 **流動性**：成交量 $\ge$ 1,000 張
+1. 🌊 **流動性**：成交量 $\ge$ 10,000 張 (可依需求調整)
 2. 📈 **動能**：OBV向上交叉 + 站上10日線
 3. 🎯 **型態**：當日收紅K 突破近20日平台前高
 """)
 scan_button = st.sidebar.button("開始多條件智慧掃描", use_container_width=True)
 
-# --- 資料抓取與技術指標計算函數 ---
+# --- 資料抓取與技術指標計算函數 (修正 auto_adjust=False 避免價格出現小數點異常) ---
 @st.cache_data(ttl=300, show_spinner=False)
 def load_stock_data(symbol, period):
     symbols_to_try = [symbol]
@@ -109,7 +109,8 @@ def load_stock_data(symbol, period):
     for s in symbols_to_try:
         try:
             stock = yf.Ticker(s)
-            temp_df = stock.history(period=period)
+            # 關鍵修正：auto_adjust=False 確保抓取真實原始價格，不進行還原權值的小數點變異
+            temp_df = stock.history(period=period, auto_adjust=False)
             if temp_df is not None and not temp_df.empty:
                 df = temp_df
                 info = stock.info
@@ -121,13 +122,19 @@ def load_stock_data(symbol, period):
     if df is None or df.empty:
         return None, None, valid_symbol
 
+    # 確保價格欄位四捨五入到小數點後 2 位
+    price_cols = ['Open', 'High', 'Low', 'Close']
+    for col in price_cols:
+        if col in df.columns:
+            df[col] = df[col].round(2)
+
     df['Volume_Zhang'] = df['Volume'] / 1000
 
-    df['MA10'] = df['Close'].rolling(window=10).mean()
-    df['MA20'] = df['Close'].rolling(window=20).mean()
+    df['MA10'] = df['Close'].rolling(window=10).mean().round(2)
+    df['MA20'] = df['Close'].rolling(window=20).mean().round(2)
     df['STD'] = df['Close'].rolling(window=20).std()
-    df['Upper'] = df['MA20'] + (df['STD'] * 2)
-    df['Lower'] = df['MA20'] - (df['STD'] * 2)
+    df['Upper'] = (df['MA20'] + (df['STD'] * 2)).round(2)
+    df['Lower'] = (df['MA20'] - (df['STD'] * 2)).round(2)
 
     df['High_20'] = df['High'].shift(1).rolling(window=20).max()
 
@@ -155,8 +162,11 @@ if scan_button:
                 if temp_df is not None and len(temp_df) > 20:
                     last = temp_df.iloc[-1]
                     
+                    # 條件1：流動性成交量 >= 10000張 (可依需要改成 1000)
                     cond_volume = last['Volume_Zhang'] >= 10000
+                    # 條件2：OBV 向上且站上10日線
                     cond_obv_ma = (last['Close'] > last['MA10']) and (last['OBV'] >= last['OBV_MA9'])
+                    # 條件3 & 4：紅K突破20日高點
                     is_red_k = last['Close'] > last['Open']
                     is_breakout = last['Close'] >= last['High_20']
                     
@@ -185,7 +195,7 @@ if st.session_state.scan_results is not None:
         st.dataframe(df_matched, use_container_width=True)
         st.info("💡 提示：點擊左側選單切換代號，即可直接檢視這些突破股的支撐壓力與技術線圖！")
     else:
-        st.warning("目前清單中沒有完全符合「成交量1000張以上 + 站上10日線 + OBV向上 + 紅K突破20日高點」的個股。")
+        st.warning("目前清單中沒有完全符合「成交量10000張以上 + 站上10日線 + OBV向上 + 紅K突破20日高點」的個股。")
     st.markdown("---")
 
 # 載入當前選擇的股票資料
@@ -209,14 +219,12 @@ else:
     change = latest['Close'] - prev_close
     pct_change = (change / prev_close) * 100 if prev_close != 0 else 0
 
-    # 走勢支撐與壓力計算
     support_1 = latest['Lower']
     support_2 = latest['MA10']
     resistance_1 = latest['Upper']
     resistance_2 = df['High'].rolling(20).max().iloc[-1]
     current_price = latest['Close']
 
-    # 燈號判讀
     short_signal = "🟡 中立盤整"
     if current_price > latest['MA10'] and latest['RSV'] > 50:
         short_signal = "🟢 短線偏多"
@@ -245,14 +253,12 @@ else:
         short_term_strategy = f"短線處於盤整震盪，上下空間有限，應避免追高殺低。"
         long_term_strategy = f"中長線待成交量與方向明確化（帶量突破布林上軌或跌破支撐），再調整部位大小。"
 
-    # 顯示主標題與名稱
     st.markdown(f"### 🎯 **{chinese_name}** `({actual_symbol})`")
     
     col_light1, col_light2, col_space = st.columns([3, 3, 4])
     col_light1.markdown(f"**短線燈號：** {short_signal}")
     col_light2.markdown(f"**中長線燈號：** {long_signal}")
 
-    # 新增：操盤解說專屬區塊
     with st.expander("💡 **【AI 專業操盤解說與進出策略】**", expanded=True):
         st.markdown(f"""
 - 📍 **建議入手價**：{entry_price}

@@ -166,7 +166,8 @@ else:
     # 顯示主標題與名稱
     st.markdown(f"### 🎯 **{chinese_name}** `({actual_symbol})`")
     
-    col_light1, col_light2, col_space = st.columns([2, 2, 6])
+    # 修正欄位寬度與排版，避免文字被擠壓換行
+    col_light1, col_light2, col_space = st.columns([3, 3, 4])
     col_light1.markdown(f"**短線燈號：** {short_signal}")
     col_light2.markdown(f"**中長線燈號：** {long_signal}")
 
@@ -213,10 +214,9 @@ else:
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- 數據明細表（完全中文化欄位） ---
+    # --- 數據明細表 ---
     st.subheader(f"📋 近期技術指標與交易數據明細")
     
-    # 重新命名欄位以便在表格中顯示中文
     rename_dict = {
         'Open': '開盤',
         'High': '最高',
@@ -235,7 +235,6 @@ else:
     display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA10', 'MA20', 'Upper', 'Lower', 'OBV', 'OBV_MA9', 'RSV'] if c in df.columns]
     df_display = df[display_cols].copy()
     
-    # 數值四捨五入
     if 'RSV' in df_display.columns:
         df_display['RSV'] = df_display['RSV'].round(2)
     if 'OBV_MA9' in df_display.columns:
@@ -249,7 +248,6 @@ else:
     if 'Lower' in df_display.columns:
         df_display['Lower'] = df_display['Lower'].round(2)
 
-    # 套用中文欄位名稱並將日期索引轉為乾淨的字串格式
     df_display = df_display.rename(columns=rename_dict)
     df_display.index = pd.to_datetime(df_display.index).strftime('%Y-%m-%d')
     df_display.index.name = '日期'

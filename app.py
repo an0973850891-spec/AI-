@@ -155,7 +155,7 @@ if scan_button:
                 if temp_df is not None and len(temp_df) > 20:
                     last = temp_df.iloc[-1]
                     
-                    cond_volume = last['Volume_Zhang'] >= 1000
+                    cond_volume = last['Volume_Zhang'] >= 10000
                     cond_obv_ma = (last['Close'] > last['MA10']) and (last['OBV'] >= last['OBV_MA9'])
                     is_red_k = last['Close'] > last['Open']
                     is_breakout = last['Close'] >= last['High_20']

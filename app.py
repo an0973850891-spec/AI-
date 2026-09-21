@@ -1,12 +1,13 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- 頁面設定 ---
 st.set_page_config(
-    page_title="台股盤後與多股比較分析系統",
+    page_title="台股盤後與技術指標分析系統",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -57,7 +58,7 @@ period_map = {
     "5年": "5y"
 }
 
-# --- 資料抓取函數 (加入防呆與快取) ---
+# --- 資料抓取與技術指標計算函數 ---
 @st.cache_data(ttl=300, show_spinner=False)
 def load_stock_data(symbol, period):
     try:
@@ -66,6 +67,26 @@ def load_stock_data(symbol, period):
         info = stock.info
         if df is None or df.empty:
             return None, None
+        
+        # --- 計算技術指標 ---
+        # 1. 布林通道 (Bollinger Bands)
+        df['MA20'] = df['Close'].rolling(window=20).mean()
+        df['STD'] = df['Close'].rolling(window=20).std()
+        df['Upper'] = df['MA20'] + (df['STD'] * 2)
+        df['Lower'] = df['MA20'] - (df['STD'] * 2)
+
+        # 2. OBV 能量潮指標 (On-Balance Volume)
+        # 當日收盤 > 昨日收盤，OBV + 成交量；收盤 < 昨日收盤，OBV - 成交量；相等則維持不變
+        df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
+
+        # 3. RSV 未成熟隨機值 (通常以 9 日為週期：(收盤 - 9日最低) / (9日最高 - 9日最低) * 100)
+        n = 9
+        low_min = df['Low'].rolling(window=n, min_periods=1).min()
+        high_max = df['High'].rolling(window=n, min_periods=1).max()
+        # 避免分母為 0
+        denominator = high_max - low_min
+        df['RSV'] = np.where(denominator == 0, 50, (df['Close'] - low_min) / denominator * 100)
+
         return df, info
     except Exception as e:
         return None, None
@@ -97,15 +118,15 @@ def load_multi_stock_data(symbols, period):
         return None
 
 # 載入主股票與多股比較資料
-with st.spinner("正在從 Yahoo 股市載入資料..."):
+with st.spinner("正在從 Yahoo 股市載入資料與計算指標..."):
     df, stock_info = load_stock_data(primary_ticker, period_map[period_option])
     df_multi = load_multi_stock_data(selected_tickers, period_map[period_option])
 
 # --- 主畫面標題 ---
-st.title("📊 台股盤後分析與多股走勢比較系統")
+st.title("📊 台股盤後分析與技術指標系統")
 
 if df is None or df.empty:
-    st.error(f"找不到代號 `{primary_ticker}` 的資料或 Yahoo 股市連線逾時。請確認台股代號是否正確（例如上市 2330.TW）。")
+    st.error(f"找不到代號 `{primary_ticker}` 的資料或 Yahoo 股市連線逾時。請確認台股代號是否正確。")
 else:
     # 1. 主股票即時摘要
     latest = df.iloc[-1]
@@ -119,29 +140,24 @@ else:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("最新收盤價", f"{latest['Close']:.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
     col2.metric("成交量", f"{int(latest['Volume']):,}")
-    col3.metric("區間最高", f"{df['High'].max():.2f}")
-    col4.metric("區間最低", f"{df['Low'].min():.2f}")
-
-    # --- 技術指標計算：布林軌道 ---
-    df['MA20'] = df['Close'].rolling(window=20).mean()
-    df['STD'] = df['Close'].rolling(window=20).std()
-    df['Upper'] = df['MA20'] + (df['STD'] * 2)
-    df['Lower'] = df['MA20'] - (df['STD'] * 2)
+    col3.metric("RSV (9日)", f"{latest['RSV']:.2f}%")
+    col4.metric("OBV 能量潮", f"{int(latest['OBV']):,}")
 
     # --- 分頁介面 ---
-    tab1, tab2, tab3 = st.tabs(["📈 主股 K線與布林通道", "📊 自選股多股走勢比較", "📋 交易數據明細"])
+    tab1, tab2, tab3 = st.tabs(["📈 K線、布林通道與 OBV", "📊 自選股多股走勢比較", "📋 技術指標與交易數據明細"])
 
     with tab1:
-        st.subheader(f"{primary_ticker} 日 K 線圖與布林通道")
+        st.subheader(f"{primary_ticker} 技術線圖 (K線 + 布林軌道 + 成交量 + OBV)")
         
+        # 建立 3 個子圖表：上圖(K線與布林)，中圖(成交量)，下圖(OBV)
         fig = make_subplots(
-            rows=2, cols=1, 
+            rows=3, cols=1, 
             shared_xaxes=True, 
             vertical_spacing=0.03, 
-            row_heights=[0.7, 0.3]
+            row_heights=[0.55, 0.22, 0.22]
         )
 
-        # K線
+        # 1. K線
         fig.add_trace(go.Candlestick(
             x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
             name='K線', increasing_line_color='#ef5350', decreasing_line_color='#26a69a'
@@ -150,16 +166,21 @@ else:
         # 布林通道上下軌
         fig.add_trace(go.Scatter(x=df.index, y=df['Upper'], name='布林上軌', line=dict(color='rgba(250, 128, 114, 0.8)', width=1)), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name='布林中軌 (MA20)', line=dict(color='rgba(30, 144, 255, 0.8)', width=1.5)), row=1, col=1)
-        # 已修正此處重複的 row/col 參數
         fig.add_trace(go.Scatter(x=df.index, y=df['Lower'], name='布林下軌', line=dict(color='rgba(144, 238, 144, 0.8)', width=1), fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)'), row=1, col=1)
 
-        # 成交量
+        # 2. 成交量
         colors = ['#ef5350' if row['Close'] >= row['Open'] else '#26a69a' for index, row in df.iterrows()]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker_color=colors), row=2, col=1)
 
+        # 3. OBV 能量潮指標
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['OBV'], name='OBV 能量潮', 
+            line=dict(color='#ab63fa', width=1.5)
+        ), row=3, col=1)
+
         fig.update_layout(
             xaxis_rangeslider_visible=False,
-            height=550,
+            height=700,
             margin=dict(l=10, r=10, t=30, b=10),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             hovermode='x unified'
@@ -200,6 +221,11 @@ else:
             st.info("請至少選擇一檔有效的股票以顯示比較圖表。")
 
     with tab3:
-        st.subheader(f"📋 {primary_ticker} 近期交易明細數據")
-        display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA20', 'Upper', 'Lower'] if c in df.columns]
-        st.dataframe(df[display_cols].tail(20).sort_index(ascending=False), use_container_width=True)
+        st.subheader(f"📋 {primary_ticker} 近期技術指標與交易數據明細")
+        display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA20', 'Upper', 'Lower', 'OBV', 'RSV'] if c in df.columns]
+        # 將數值稍微格式化方便閱讀
+        df_display = df[display_cols].copy()
+        if 'RSV' in df_display.columns:
+            df_display['RSV'] = df_display['RSV'].round(2)
+        
+        st.dataframe(df_display.tail(20).sort_index(ascending=False), use_container_width=True)

@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 常見台股中文名稱與代號對照池 (用於快速掃描與預設) ---
+# --- 常見台股中文名稱與代號對照池 ---
 STOCK_POOL = {
     "2330.TW": "台積電", "2317.TW": "鴻海", "2454.TW": "聯發科", "2308.TW": "台達電",
     "2382.TW": "廣達", "2603.TW": "長榮", "2609.TW": "陽明", "2615.TW": "萬海",
@@ -21,15 +21,18 @@ STOCK_POOL = {
     "3037.TW": "欣興", "2379.TW": "瑞昱", "3711.TW": "日月光投控", "2303.TW": "聯電",
     "1301.TW": "台塑", "1303.TW": "南亞", "1326.TW": "化纖", "2002.TW": "中鋼",
     "00878.TW": "國泰永續高股息", "0050.TW": "元大台灣50", "0056.TW": "元大高股息", "00881.TW": "國泰台灣5G+",
-    "5351.TWO": "鈺創", "3264.TW": "欣銓", "6182.TW": "合晶", "5483.TWO": "中美晶"
+    "5351.TWO": "鈺創", "3264.TWO": "欣銓", "6182.TWO": "合晶", "5483.TWO": "中美晶"
 }
 
-# --- 初始化 Session State ---
+# --- 初始化 Session State (記憶自選股與篩選結果) ---
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = list(STOCK_POOL.keys())
 
 if 'primary_ticker' not in st.session_state:
     st.session_state.primary_ticker = "2330.TW"
+
+if 'scan_results' not in st.session_state:
+    st.session_state.scan_results = None
 
 # --- 側邊欄：功能選單與設定 ---
 st.sidebar.header("🔍 股票查詢與智慧篩選")
@@ -129,9 +132,8 @@ def load_stock_data(symbol, period):
 
     return df, info, valid_symbol
 
-# --- 智慧掃描彈出或展開畫面 ---
+# --- 執行掃描並存入 session_state ---
 if scan_button:
-    st.markdown("## 🔍 盤後強勢量價齊揚股票掃描結果")
     with st.spinner("正在掃描股票池中的 OBV 與 10日均線交疊向上狀態..."):
         matched_stocks = []
         progress_bar = st.progress(0)
@@ -142,7 +144,6 @@ if scan_button:
                 temp_df, _, _ = load_stock_data(sym, "3mo")
                 if temp_df is not None and len(temp_df) > 10:
                     last = temp_df.iloc[-1]
-                    # 條件：收盤價 > MA10 且 OBV >= OBV_MA9
                     if last['Close'] > last['MA10'] and last['OBV'] >= last['OBV_MA9']:
                         matched_stocks.append({"代號": sym, "名稱": cname, "收盤價": round(last['Close'], 2), "RSV": round(last['RSV'], 1)})
             except:
@@ -150,14 +151,18 @@ if scan_button:
             progress_bar.progress((idx + 1) / total_stocks)
         
         progress_bar.empty()
-        
-        if matched_stocks:
-            st.success(f"掃描完成！共找到 {len(matched_stocks)} 檔符合「量價齊揚 (OBV向上交叉 + 站上10日線)」的潛力股：")
-            df_matched = pd.DataFrame(matched_stocks)
-            st.dataframe(df_matched, use_container_width=True)
-            st.info("💡 提示：您可以從左側選單切換代號來查看這些潛力股的詳細 K 線與布林軌道！")
-        else:
-            st.warning("目前清單中沒有完全符合條件的股票（可能近期大盤震盪，量能未全面翻多）。")
+        st.session_state.scan_results = matched_stocks
+
+# --- 主畫面：顯示持久化的掃描結果 ---
+if st.session_state.scan_results is not None:
+    st.markdown("## 🔍 盤後強勢量價齊揚股票掃描結果")
+    if len(st.session_state.scan_results) > 0:
+        st.success(f"共找到 {len(st.session_state.scan_results)} 檔符合「量價齊揚 (OBV向上交叉 + 站上10日線)」的潛力股：")
+        df_matched = pd.DataFrame(st.session_state.scan_results)
+        st.dataframe(df_matched, use_container_width=True)
+        st.info("💡 提示：掃描結果已固定保留，您可以隨時從左側選單切換代號來查看這些潛力股的詳細 K 線圖與技術指標！")
+    else:
+        st.warning("目前清單中沒有完全符合條件的股票。")
     st.markdown("---")
 
 # 載入當前選擇的股票資料

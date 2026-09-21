@@ -148,8 +148,15 @@ if scan_button:
                 temp_df, _, _ = load_stock_data(sym, "3mo")
                 if temp_df is not None and len(temp_df) > 10:
                     last = temp_df.iloc[-1]
-                    if last['Close'] > last['MA10'] && last['OBV'] >= last['OBV_MA9']:
-                        matched_stocks.append({"代號": sym, "名稱": cname, "收盤價": round(last['Close'], 2), "成交量(張)": int(last['Volume_Zhang']), "RSV": round(last['RSV'], 1)})
+                    # 已修正：使用英文 and 替代 &&
+                    if last['Close'] > last['MA10'] and last['OBV'] >= last['OBV_MA9']:
+                        matched_stocks.append({
+                            "代號": sym, 
+                            "名稱": cname, 
+                            "收盤價": round(last['Close'], 2), 
+                            "成交量(張)": int(last['Volume_Zhang']), 
+                            "RSV": round(last['RSV'], 1)
+                        })
             except:
                 pass
             progress_bar.progress((idx + 1) / total_stocks)

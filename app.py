@@ -13,6 +13,21 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- 常見台股中文名稱對照表（確保中文名稱完美顯示） ---
+STOCK_NAME_MAP = {
+    "2330.TW": "台積電",
+    "2317.TW": "鴻海",
+    "2454.TW": "聯發科",
+    "00878.TW": "國泰永續高股息",
+    "00881.TW": "國泰台灣5G+",
+    "2603.TW": "長榮",
+    "2308.TW": "台達電",
+    "2382.TW": "廣達",
+    "2881.TW": "富邦金",
+    "2882.TW": "國泰金",
+    "5351.TWO": "鈺創",
+}
+
 # --- 初始化 Session State (記憶自選股清單) ---
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = ["2330.TW", "2317.TW", "2454.TW", "00878.TW", "00881.TW"]
@@ -23,20 +38,15 @@ if 'primary_ticker' not in st.session_state:
 # --- 側邊欄：功能選單與設定 ---
 st.sidebar.header("🔍 股票查詢與自選股")
 
-# 1. 獨立的代號新增輸入框與按鈕
 col_input, col_btn = st.sidebar.columns([3, 1])
 with col_input:
     new_ticker_input = st.text_input("新增自選代號", placeholder="例如: 2308, 5351, 2603", label_visibility="collapsed")
 with col_btn:
     add_clicked = st.button("➕ 新增", use_container_width=True)
 
-# 當按下新增按鈕時處理
 if add_clicked and new_ticker_input:
     clean_input = new_ticker_input.strip().upper()
-    
-    # 智慧判斷後綴：若沒輸入後綴，預設先補 .TW
     if not clean_input.endswith((".TW", ".TWO", ".US")):
-        # 簡單防呆：台股上市通常是 .TW，上櫃可能是 .TWO。若使用者直接輸入代號，先預設加 .TW
         formatted_ticker = f"{clean_input}.TW"
     else:
         formatted_ticker = clean_input
@@ -44,11 +54,9 @@ if add_clicked and new_ticker_input:
     if formatted_ticker not in st.session_state.watchlist:
         st.session_state.watchlist.append(formatted_ticker)
     
-    # 自動切換到剛新增的股票
     st.session_state.primary_ticker = formatted_ticker
     st.rerun()
 
-# 2. 自選股清單下拉選單（支援點擊切換，並可隨時從清單中選擇）
 primary_ticker = st.sidebar.selectbox(
     "選擇要檢視的股票", 
     options=st.session_state.watchlist, 
@@ -56,7 +64,6 @@ primary_ticker = st.sidebar.selectbox(
 )
 st.session_state.primary_ticker = primary_ticker
 
-# 時間區間選項
 period_option = st.sidebar.selectbox(
     "歷史K線區間",
     options=["1個月", "3個月", "6個月", "1年", "2年", "5年"],
@@ -72,10 +79,9 @@ period_map = {
     "5年": "5y"
 }
 
-# --- 資料抓取與技術指標計算函數 (加入雙後綴自動備援機制) ---
+# --- 資料抓取與技術指標計算函數 ---
 @st.cache_data(ttl=300, show_spinner=False)
 def load_stock_data(symbol, period):
-    # 建立嘗試清單：如果使用者輸入的代號抓不到，自動幫忙切換 .TW 或 .TWO 測試
     symbols_to_try = [symbol]
     if not symbol.endswith((".TW", ".TWO")):
         symbols_to_try = [f"{symbol}.TW", f"{symbol}.TWO"]
@@ -103,19 +109,16 @@ def load_stock_data(symbol, period):
     if df is None or df.empty:
         return None, None, valid_symbol
 
-    # --- 計算技術指標 ---
-    # 1. 價格均線 (MA10, MA20) 與 布林通道
+    # 技術指標計算
     df['MA10'] = df['Close'].rolling(window=10).mean()
     df['MA20'] = df['Close'].rolling(window=20).mean()
     df['STD'] = df['Close'].rolling(window=20).std()
     df['Upper'] = df['MA20'] + (df['STD'] * 2)
     df['Lower'] = df['MA20'] - (df['STD'] * 2)
 
-    # 2. OBV 能量潮指標與 OBV 均線 (MAOBV，預設 9 日)
     df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
     df['OBV_MA9'] = df['OBV'].rolling(window=9).mean()
 
-    # 3. RSV 未成熟隨機值 (9日)
     n = 9
     low_min = df['Low'].rolling(window=n, min_periods=1).min()
     high_max = df['High'].rolling(window=n, min_periods=1).max()
@@ -128,21 +131,52 @@ def load_stock_data(symbol, period):
 with st.spinner(f"正在從 Yahoo 股市載入 {primary_ticker} 資料與計算指標..."):
     df, stock_info, actual_symbol = load_stock_data(primary_ticker, period_map[period_option])
 
-# --- 主畫面標題 ---
+# --- 主畫面標題與中文名稱解析 ---
 st.title("📊 台股盤後分析與技術指標系統")
 
 if df is None or df.empty:
     st.error(f"找不到代號 `{primary_ticker}` 的資料。請確認台股代號是否正確（例如：上市請輸入 `2330` 或 `2330.TW`，上櫃請輸入 `5351` 或 `5351.TWO`）。")
 else:
-    # 1. 即時摘要看板
+    # 取得中文名稱優先順序：對照表 -> Yahoo info 裡的 shortName/longName -> 代號本身
+    chinese_name = STOCK_NAME_MAP.get(actual_symbol)
+    if not chinese_name and stock_info:
+        chinese_name = stock_info.get('chineseName', stock_info.get('shortName', actual_symbol))
+    if not chinese_name:
+        chinese_name = actual_symbol
+
     latest = df.iloc[-1]
     prev_close = df.iloc[-2]['Close'] if len(df) > 1 else latest['Open']
     change = latest['Close'] - prev_close
     pct_change = (change / prev_close) * 100 if prev_close != 0 else 0
 
-    name = stock_info.get('longName', actual_symbol) if stock_info else actual_symbol
+    # --- AI 燈號短中長線判讀邏輯 ---
+    # 短線評估：結合最新收盤價與 10日均線、RSV
+    short_signal = "🟡 中立盤整"
+    if latest['Close'] > latest['MA10'] and latest['RSV'] > 50:
+        short_signal = "🟢 短線偏多"
+    elif latest['Close'] < latest['MA10'] and latest['RSV'] < 50:
+        short_signal = "🔴 短線偏空"
+
+    # 中長線評估：結合 MA20 (布林中軌)、OBV 與 OBV 9日均線
+    long_signal = "🟡 盤整觀望"
+    obv_val = latest['OBV']
+    obv_ma9 = latest['OBV_MA9'] if not pd.isna(latest['OBV_MA9']) else obv_val
+    if latest['Close'] > latest['MA20'] and obv_val >= obv_ma9:
+        long_signal = "🟢 中長線多頭"
+    elif latest['Close'] < latest['MA20'] and obv_val < obv_ma9:
+        long_signal = "🔴 中長線空頭"
+
+    # 顯示主標題與名稱
+    st.markdown(f"### 🎯 **{chinese_name}** `({actual_symbol})`")
     
-    st.markdown(f"### 目前檢視：`{name}` ({actual_symbol})")
+    # 燈號提示列
+    col_light1, col_light2, col_space = st.columns([2, 2, 6])
+    col_light1.markdown(f"**短線燈號：** {short_signal}")
+    col_light2.markdown(f"**中長線燈號：** {long_signal}")
+
+    st.markdown("---")
+
+    # 數據看板
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("最新收盤價", f"{latest['Close']:.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
     col2.metric("成交量", f"{int(latest['Volume']):,}")
@@ -165,9 +199,7 @@ else:
         name='K線', increasing_line_color='#ef5350', decreasing_line_color='#26a69a'
     ), row=1, col=1)
 
-    # 10日均線 (MA10)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA10'], name='10日均線 (MA10)', line=dict(color='orange', width=1.5)), row=1, col=1)
-    # 布林通道上下軌與中軌
     fig.add_trace(go.Scatter(x=df.index, y=df['Upper'], name='布林上軌', line=dict(color='rgba(250, 128, 114, 0.8)', width=1)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name='布林中軌 (MA20)', line=dict(color='rgba(30, 144, 255, 0.8)', width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['Lower'], name='布林下軌', line=dict(color='rgba(144, 238, 144, 0.8)', width=1), fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)'), row=1, col=1)

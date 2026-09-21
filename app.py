@@ -15,7 +15,7 @@ st.set_page_config(
 # --- 側邊欄：功能選單與設定 ---
 st.sidebar.header("🔍 查詢與自選股設定")
 
-# 1. 常用熱門自選股清單（可自行增減）
+# 1. 常用熱門自選股清單
 default_watchlist = ["2330.TW", "2317.TW", "2454.TW", "00878.TW", "00881.TW"]
 
 # 讓使用者自選或輸入股票
@@ -25,21 +25,21 @@ selected_tickers = st.sidebar.multiselect(
     default=["2330.TW", "2317.TW"]
 )
 
-# 允許使用者手動輸入代號加入（台股代號自動補齊 .TW）
+# 允許使用者手動輸入代號加入
 custom_input = st.sidebar.text_input("新增自選股代號 (例如: 2603, 2308)", value="")
 if custom_input:
-    formatted_input = custom_input.strip()
+    formatted_input = custom_input.strip().upper()
     if not formatted_input.endswith((".TW", ".TWO")):
         formatted_input = f"{formatted_input}.TW"
     if formatted_input not in selected_tickers:
         selected_tickers.append(formatted_input)
 
-# 主查詢單一股票（用於詳細 K 線與布林軌道）
-if selected_tickers:
-    primary_ticker = st.sidebar.selectbox("選擇要檢視詳細 K 線的主股票", options=selected_tickers, index=0)
-else:
-    primary_ticker = "2330.TW"
+# 確保自選清單不為空
+if not selected_tickers:
     selected_tickers = ["2330.TW"]
+
+# 主查詢單一股票
+primary_ticker = st.sidebar.selectbox("選擇要檢視詳細 K 線的主股票", options=selected_tickers, index=0)
 
 # 時間區間選項
 period_option = st.sidebar.selectbox(
@@ -57,25 +57,44 @@ period_map = {
     "5年": "5y"
 }
 
-# --- 資料抓取函數 ---
-@st.cache_data(ttl=300)
+# --- 資料抓取函數 (加入防呆與快取) ---
+@st.cache_data(ttl=300, show_spinner=False)
 def load_stock_data(symbol, period):
     try:
         stock = yf.Ticker(symbol)
         df = stock.history(period=period)
         info = stock.info
+        if df is None or df.empty:
+            return None, None
         return df, info
     except Exception as e:
         return None, None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)
 def load_multi_stock_data(symbols, period):
     try:
-        # 批次下載多檔股票的收盤價
-        data = yf.download(symbols, period=period, progress=False)['Close']
-        if isinstance(data, pd.Series):
-            data = data.to_frame(name=symbols[0])
-        return data
+        # 使用 yfinance 批次下載，設定 group_by 確保結構穩定
+        data = yf.download(symbols, period=period, progress=False)
+        if data is None or data.empty:
+            return None
+        
+        # 兼容 yfinance 不同版本的回傳格式
+        if isinstance(data.columns, pd.MultiIndex):
+            if 'Close' in data.columns.levels[0]:
+                df_close = data['Close']
+            else:
+                return None
+        else:
+            if 'Close' in data.columns:
+                df_close = data[['Close']]
+                df_close.columns = symbols
+            else:
+                df_close = data
+
+        if isinstance(df_close, pd.Series):
+            df_close = df_close.to_frame(name=symbols[0])
+            
+        return df_close.dropna(how='all')
     except Exception as e:
         return None
 
@@ -88,15 +107,15 @@ with st.spinner("正在從 Yahoo 股市載入資料..."):
 st.title("📊 台股盤後分析與多股走勢比較系統")
 
 if df is None or df.empty:
-    st.error(f"找不到代號 `{primary_ticker}` 的資料，請確認代號是否正確。")
+    st.error(f"找不到代號 `{primary_ticker}` 的資料或 Yahoo 股市連線逾時。請確認台股代號是否正確（例如上市 2330.TW）。")
 else:
     # 1. 主股票即時摘要
     latest = df.iloc[-1]
     prev_close = df.iloc[-2]['Close'] if len(df) > 1 else latest['Open']
     change = latest['Close'] - prev_close
-    pct_change = (change / prev_close) * 100
+    pct_change = (change / prev_close) * 100 if prev_close != 0 else 0
 
-    name = stock_info.get('longName', primary_ticker)
+    name = stock_info.get('longName', primary_ticker) if stock_info else primary_ticker
     
     st.markdown(f"### 目前檢視：`{name}` ({primary_ticker})")
     col1, col2, col3, col4 = st.columns(4)
@@ -153,33 +172,36 @@ else:
         st.markdown("將所選股票在區間起点的價格視為 **0%**，方便直觀比較強弱勢表現。")
 
         if df_multi is not None and not df_multi.empty:
-            # 計算累積報酬率百分比: (Price / First_Price - 1) * 100
-            df_pct = (df_multi / df_multi.iloc[0] - 1) * 100
-            
-            fig_multi = go.Figure()
-            for col in df_pct.columns:
-                # 濾除全 NaN 的欄位
-                if not df_pct[col].dropna().empty:
+            # 移除含有 NaN 的資料行並計算報酬率
+            df_multi_clean = df_multi.dropna()
+            if not df_multi_clean.empty:
+                df_pct = (df_multi_clean / df_multi_clean.iloc[0] - 1) * 100
+                
+                fig_multi = go.Figure()
+                for col in df_pct.columns:
                     fig_multi.add_trace(go.Scatter(
                         x=df_pct.index,
                         y=df_pct[col],
                         mode='lines',
-                        name=col,
+                        name=str(col),
                         line=dict(width=2)
                     ))
 
-            fig_multi.update_layout(
-                height=500,
-                margin=dict(l=10, r=10, t=30, b=10),
-                xaxis_title='日期',
-                yaxis_title='累積報酬率 (%)',
-                hovermode='x unified',
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            st.plotly_chart(fig_multi, use_container_width=True)
+                fig_multi.update_layout(
+                    height=500,
+                    margin=dict(l=10, r=10, t=30, b=10),
+                    xaxis_title='日期',
+                    yaxis_title='累積報酬率 (%)',
+                    hovermode='x unified',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                st.plotly_chart(fig_multi, use_container_width=True)
+            else:
+                st.warning("所選股票的時間交集區間不足，無法繪製比較圖。")
         else:
             st.info("請至少選擇一檔有效的股票以顯示比較圖表。")
 
     with tab3:
         st.subheader(f"📋 {primary_ticker} 近期交易明細數據")
-        st.dataframe(df[['Open', 'High', 'Low', 'Close', 'Volume', 'MA20', 'Upper', 'Lower']].tail(20).sort_index(ascending=False), use_container_width=True)
+        display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA20', 'Upper', 'Lower'] if c in df.columns]
+        st.dataframe(df[display_cols].tail(20).sort_index(ascending=False), use_container_width=True)

@@ -166,18 +166,22 @@ else:
     # 顯示主標題與名稱
     st.markdown(f"### 🎯 **{chinese_name}** `({actual_symbol})`")
     
-    # 修正欄位寬度與排版，避免文字被擠壓換行
     col_light1, col_light2, col_space = st.columns([3, 3, 4])
     col_light1.markdown(f"**短線燈號：** {short_signal}")
     col_light2.markdown(f"**中長線燈號：** {long_signal}")
 
     st.markdown("---")
 
+    # 將 OBV 轉換為「萬」單位字串，避免畫面太長被卡斷
+    obv_str = f"{latest['OBV'] / 10000:,.1f}萬"
+    obv_ma9_val = latest['OBV_MA9']
+    obv_ma9_str = f"{obv_ma9_val / 10000:,.1f}萬" if not pd.isna(obv_ma9_val) else "0萬"
+
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("最新收盤價", f"{latest['Close']:.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
     col2.metric("成交量", f"{int(latest['Volume']):,}")
     col3.metric("RSV (9日)", f"{latest['RSV']:.2f}%")
-    col4.metric("OBV / OBV_MA9", f"{int(latest['OBV']):,} / {int(latest['OBV_MA9']) if not pd.isna(latest['OBV_MA9']) else 0:,}")
+    col4.metric("OBV / OBV_MA9", f"{obv_str} / {obv_ma9_str}")
 
     # --- 技術線圖繪製 ---
     st.subheader(f"📈 技術線圖 (K線 + 10日均線 + 布林軌道 + 成交量 + OBV 雙線)")

@@ -85,13 +85,13 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🚀 專業進階選股掃描器")
 st.sidebar.markdown("""
 **篩選條件：**
-1. 🌊 **流動性**：成交量 $\ge$ 10,000 張 (可依需求調整)
+1. 🌊 **流動性**：成交量 $\ge$ 10,000 張
 2. 📈 **動能**：OBV向上交叉 + 站上10日線
 3. 🎯 **型態**：當日收紅K 突破近20日平台前高
 """)
 scan_button = st.sidebar.button("開始多條件智慧掃描", use_container_width=True)
 
-# --- 資料抓取與技術指標計算函數 (修正 auto_adjust=False 避免價格出現小數點異常) ---
+# --- 資料抓取與技術指標計算函數 ---
 @st.cache_data(ttl=300, show_spinner=False)
 def load_stock_data(symbol, period):
     symbols_to_try = [symbol]
@@ -109,7 +109,6 @@ def load_stock_data(symbol, period):
     for s in symbols_to_try:
         try:
             stock = yf.Ticker(s)
-            # 關鍵修正：auto_adjust=False 確保抓取真實原始價格，不進行還原權值的小數點變異
             temp_df = stock.history(period=period, auto_adjust=False)
             if temp_df is not None and not temp_df.empty:
                 df = temp_df
@@ -122,7 +121,6 @@ def load_stock_data(symbol, period):
     if df is None or df.empty:
         return None, None, valid_symbol
 
-    # 確保價格欄位四捨五入到小數點後 2 位
     price_cols = ['Open', 'High', 'Low', 'Close']
     for col in price_cols:
         if col in df.columns:
@@ -138,14 +136,35 @@ def load_stock_data(symbol, period):
 
     df['High_20'] = df['High'].shift(1).rolling(window=20).max()
 
+    # OBV 能量潮
     df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume_Zhang']).fillna(0).cumsum()
     df['OBV_MA9'] = df['OBV'].rolling(window=9).mean()
 
+    # RSV 與 KD 指標計算 (9日)
     n = 9
     low_min = df['Low'].rolling(window=n, min_periods=1).min()
     high_max = df['High'].rolling(window=n, min_periods=1).max()
     denominator = high_max - low_min
     df['RSV'] = np.where(denominator == 0, 50, (df['Close'] - low_min) / denominator * 100)
+
+    # 計算 K 值與 D 值 (初始值設為 50)
+    k_list = [50.0]
+    d_list = [50.0]
+    rsv_arr = df['RSV'].values
+    for i in range(1, len(rsv_arr)):
+        prev_k = k_list[-1]
+        prev_d = d_list[-1]
+        curr_rsv = rsv_arr[i]
+        if pd.isna(curr_rsv):
+            curr_rsv = 50.0
+        curr_k = (2/3) * prev_k + (1/3) * curr_rsv
+        curr_d = (2/3) * prev_d + (1/3) * curr_k
+        k_list.append(curr_k)
+        d_list.append(curr_d)
+
+    df['K'] = np.round(k_list, 2)
+    df['D'] = np.round(d_list, 2)
+    df['RSV'] = np.round(df['RSV'], 2)
 
     return df, info, valid_symbol
 
@@ -162,11 +181,8 @@ if scan_button:
                 if temp_df is not None and len(temp_df) > 20:
                     last = temp_df.iloc[-1]
                     
-                    # 條件1：流動性成交量 >= 10000張 (可依需要改成 1000)
                     cond_volume = last['Volume_Zhang'] >= 10000
-                    # 條件2：OBV 向上且站上10日線
                     cond_obv_ma = (last['Close'] > last['MA10']) and (last['OBV'] >= last['OBV_MA9'])
-                    # 條件3 & 4：紅K突破20日高點
                     is_red_k = last['Close'] > last['Open']
                     is_breakout = last['Close'] >= last['High_20']
                     
@@ -176,7 +192,8 @@ if scan_button:
                             "名稱": cname, 
                             "收盤價": round(last['Close'], 2), 
                             "成交量(張)": int(last['Volume_Zhang']), 
-                            "RSV": round(last['RSV'], 1),
+                            "K值": round(last['K'], 1),
+                            "D值": round(last['D'], 1),
                             "突破型態": "🔥 紅K突破前高"
                         })
             except:
@@ -195,7 +212,7 @@ if st.session_state.scan_results is not None:
         st.dataframe(df_matched, use_container_width=True)
         st.info("💡 提示：點擊左側選單切換代號，即可直接檢視這些突破股的支撐壓力與技術線圖！")
     else:
-        st.warning("目前清單中沒有完全符合「成交量10000張以上 + 站上10日線 + OBV向上 + 紅K突破20日高點」的個股。")
+        st.warning("目前清單中沒有完全符合條件的個股。")
     st.markdown("---")
 
 # 載入當前選擇的股票資料
@@ -226,9 +243,9 @@ else:
     current_price = latest['Close']
 
     short_signal = "🟡 中立盤整"
-    if current_price > latest['MA10'] and latest['RSV'] > 50:
+    if current_price > latest['MA10'] and latest['K'] > latest['D']:
         short_signal = "🟢 短線偏多"
-    elif current_price < latest['MA10'] and latest['RSV'] < 50:
+    elif current_price < latest['MA10'] and latest['K'] < latest['D']:
         short_signal = "🔴 短線偏空"
 
     long_signal = "🟡 盤整觀望"
@@ -239,18 +256,18 @@ else:
     elif current_price < latest['MA20'] and obv_val < obv_ma9:
         long_signal = "🔴 中長線空頭"
 
-    # --- 操盤解說：入手價與短中長期策略運算 ---
+    # 操盤解說
     if "偏多" in short_signal and "多頭" in long_signal:
         entry_price = f"約 **{support_2:.2f} ~ {current_price:.2f} 元**（貼近 10 日均線附近或強勢整理區間分批承接）"
-        short_term_strategy = f"短線動能強勢，上檔直指前高壓力 **{resistance_2:.2f} 元**。若量能續強可續抱，守穩 10 日線不破短多格局不變。"
-        long_term_strategy = f"中長線資金持續流入（OBV向上且站穩布林中軌）。波段目標可看布林上軌 **{resistance_1:.2f} 元** 以上，中期防守點可設在布林中軌（MA20）。"
+        short_term_strategy = f"短線動能強勢（KD金叉向上），上檔直指前高壓力 **{resistance_2:.2f} 元**。守穩 10 日線不破短多格局不變。"
+        long_term_strategy = f"中長線資金持續流入（OBV向上且站穩布林中軌）。波段目標可看布林上軌 **{resistance_1:.2f} 元** 以上。"
     elif "偏空" in short_signal and "空頭" in long_signal:
         entry_price = f"暫不建議積極進場，若欲搶短需等待量縮止跌或回測強支撐 **{support_1:.2f} 元** 附近再觀察。"
-        short_term_strategy = f"短線賣壓重，反彈若無法站回 10 日線 **({support_2:.2f})** 易受壓回測，短打宜嚴守停損。"
-        long_term_strategy = f"中長線偏空，能量潮（OBV）呈現流出。建議空手觀望或進行保守資產配置，避免躁進摸底。"
+        short_term_strategy = f"短線賣壓重（KD死叉向下），反彈若無法站回 10 日線 **({support_2:.2f})** 易受壓回測。"
+        long_term_strategy = f"中長線偏空，能量潮（OBV）呈現流出。建議空手觀望，避免躁進摸底。"
     else:
         entry_price = f"建議於區間下緣 **{support_2:.2f} ~ {support_1:.2f} 元** 尋找低接機會，或等待突破再順勢操作。"
-        short_term_strategy = f"短線處於盤整震盪，上下空間有限，應避免追高殺低。"
+        short_term_strategy = f"短線處於盤整震盪，KD 指標糾結，應避免追高殺低。"
         long_term_strategy = f"中長線待成交量與方向明確化（帶量突破布林上軌或跌破支撐），再調整部位大小。"
 
     st.markdown(f"### 🎯 **{chinese_name}** `({actual_symbol})`")
@@ -277,19 +294,20 @@ else:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("最新收盤價", f"{current_price:.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
     col2.metric("成交量", f"{int(latest['Volume_Zhang']):,} 張")
-    col3.metric("RSV (9日)", f"{latest['RSV']:.2f}%")
+    col3.metric("KD 指標", f"K:{latest['K']} / D:{latest['D']}")
     col4.metric("OBV / OBV_MA9", f"{obv_str} / {obv_ma9_str}")
 
-    # --- 技術線圖繪製 ---
-    st.subheader(f"📈 技術線圖 (K線 + 10日均線 + 布林軌道 + 成交量 + OBV 雙線)")
+    # --- 技術線圖繪製（改為 4 子圖：K線、成交量、OBV、KD） ---
+    st.subheader(f"📈 技術線圖 (K線 + 10日均線 + 布林軌道 + 成交量 + OBV + KD)")
     
     fig = make_subplots(
-        rows=3, cols=1, 
+        rows=4, cols=1, 
         shared_xaxes=True, 
         vertical_spacing=0.03, 
-        row_heights=[0.55, 0.22, 0.22]
+        row_heights=[0.45, 0.18, 0.18, 0.19]
     )
 
+    # 1. K線與均線、布林通道
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         name='K線', increasing_line_color='#ef5350', decreasing_line_color='#26a69a'
@@ -300,15 +318,24 @@ else:
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name='布林中軌 (MA20)', line=dict(color='rgba(30, 144, 255, 0.8)', width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['Lower'], name='布林下軌', line=dict(color='rgba(144, 238, 144, 0.8)', width=1), fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)'), row=1, col=1)
 
+    # 2. 成交量
     colors = ['#ef5350' if row['Close'] >= row['Open'] else '#26a69a' for index, row in df.iterrows()]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume_Zhang'], name='成交量(張)', marker_color=colors), row=2, col=1)
 
+    # 3. OBV 雙線指標
     fig.add_trace(go.Scatter(x=df.index, y=df['OBV'], name='OBV 能量潮', line=dict(color='#ab63fa', width=1.5)), row=3, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['OBV_MA9'], name='OBV 9日均線', line=dict(color='#ffa15a', width=1.2, dash='dot')), row=3, col=1)
 
+    # 4. KD 指標 (K線與D線)
+    fig.add_trace(go.Scatter(x=df.index, y=df['K'], name='K值', line=dict(color='#ff7f0e', width=1.2)), row=4, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['D'], name='D值', line=dict(color='#1f77b4', width=1.2)), row=4, col=1)
+    # 加入 KD 80 與 20 參考線
+    fig.add_hline(y=80, line_dash="dash", line_color="red", row=4, col=1, opacity=0.5)
+    fig.add_hline(y=20, line_dash="dash", line_color="green", row=4, col=1, opacity=0.5)
+
     fig.update_layout(
         xaxis_rangeslider_visible=False,
-        height=700,
+        height=800,
         margin=dict(l=10, r=10, t=30, b=10),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         hovermode='x unified'
@@ -335,22 +362,17 @@ else:
         'Lower': '布林下軌',
         'OBV_Wan': 'OBV能量潮(萬張)',
         'OBV_MA9_Wan': 'OBV9日均線(萬張)',
-        'RSV': 'RSV(9日)'
+        'RSV': 'RSV(9日)',
+        'K': 'K值',
+        'D': 'D值'
     }
     
-    display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume_Zhang_Int', 'MA10', 'MA20', 'Upper', 'Lower', 'OBV_Wan', 'OBV_MA9_Wan', 'RSV'] if c in df_table.columns]
+    display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume_Zhang_Int', 'MA10', 'MA20', 'Upper', 'Lower', 'OBV_Wan', 'OBV_MA9_Wan', 'RSV', 'K', 'D'] if c in df_table.columns]
     df_display = df_table[display_cols].copy()
     
-    if 'RSV' in df_display.columns:
-        df_display['RSV'] = df_display['RSV'].round(2)
-    if 'MA10' in df_display.columns:
-        df_display['MA10'] = df_display['MA10'].round(2)
-    if 'MA20' in df_display.columns:
-        df_display['MA20'] = df_display['MA20'].round(2)
-    if 'Upper' in df_display.columns:
-        df_display['Upper'] = df_display['Upper'].round(2)
-    if 'Lower' in df_display.columns:
-        df_display['Lower'] = df_display['Lower'].round(2)
+    for col in ['RSV', 'K', 'D', 'MA10', 'MA20', 'Upper', 'Lower']:
+        if col in df_display.columns:
+            df_display[col] = df_display[col].round(2)
 
     df_display = df_display.rename(columns=rename_dict)
     df_display.index = pd.to_datetime(df_display.index).strftime('%Y-%m-%d')

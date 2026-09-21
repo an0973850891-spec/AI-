@@ -163,6 +163,18 @@ else:
     elif latest['Close'] < latest['MA20'] and obv_val < obv_ma9:
         long_signal = "🔴 中長線空頭"
 
+    # --- AI 操作建議生成邏輯 ---
+    if "偏多" in short_signal and "多頭" in long_signal:
+        advice = "🚀 **強勢多頭格局**：短中線動能皆強，資金持續流入（OBV向上）。操作上可沿 10 日均線偏多操作，若回測布林中軌不破可視為尋找買點的時機，注意追高風險。"
+    elif "偏空" in short_signal and "空頭" in long_signal:
+        advice = "⚠️ **弱勢空頭格局**：短中線均呈現回檔，賣壓較重且成交量能偏向流出。建議暫時多看少動、嚴守停損，避免過早逢低承接搶反彈。"
+    elif "偏空" in short_signal or "空頭" in long_signal:
+        advice = "防守為主：目前技術面呈現拉回或震盪偏空走勢，短期上檔逢壓。建議保持觀望，等待量能回穩、OBV突破均線後再行尋找介入機會。"
+    elif "偏多" in short_signal:
+        advice = "短線彈升：短線雖有買盤回溫跡象，但中長線仍在打底或盤整。操作上宜短打因應，嚴設停利停損，不宜過度重倉歐能。"
+    else:
+        advice = "🔍 **盤整觀望格局**：目前短中線指標交錯、方向不明確。建議靜待突破訊號（如帶量突破布林上軌或 OBV 翻揚向上）再擬定進場策略。"
+
     # 顯示主標題與名稱
     st.markdown(f"### 🎯 **{chinese_name}** `({actual_symbol})`")
     
@@ -170,9 +182,12 @@ else:
     col_light1.markdown(f"**短線燈號：** {short_signal}")
     col_light2.markdown(f"**中長線燈號：** {long_signal}")
 
+    # 新增：操作建議顯示區塊
+    st.info(f"💡 **AI 操作建議**：{advice}")
+
     st.markdown("---")
 
-    # 將 OBV 轉換為「萬」單位字串，避免畫面太長被卡斷
+    # 將 OBV 轉換為「萬」單位字串
     obv_str = f"{latest['OBV'] / 10000:,.1f}萬"
     obv_ma9_val = latest['OBV_MA9']
     obv_ma9_str = f"{obv_ma9_val / 10000:,.1f}萬" if not pd.isna(obv_ma9_val) else "0萬"

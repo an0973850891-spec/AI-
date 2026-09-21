@@ -13,34 +13,31 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 常見台股中文名稱對照表 ---
-STOCK_NAME_MAP = {
-    "2330.TW": "台積電",
-    "2317.TW": "鴻海",
-    "2454.TW": "聯發科",
-    "00878.TW": "國泰永續高股息",
-    "00881.TW": "國泰台灣5G+",
-    "2603.TW": "長榮",
-    "2308.TW": "台達電",
-    "2382.TW": "廣達",
-    "2881.TW": "富邦金",
-    "2882.TW": "國泰金",
-    "5351.TWO": "鈺創",
+# --- 常見台股中文名稱與代號對照池 (用於快速掃描與預設) ---
+STOCK_POOL = {
+    "2330.TW": "台積電", "2317.TW": "鴻海", "2454.TW": "聯發科", "2308.TW": "台達電",
+    "2382.TW": "廣達", "2603.TW": "長榮", "2609.TW": "陽明", "2615.TW": "萬海",
+    "2881.TW": "富邦金", "2882.TW": "國泰金", "2891.TW": "中信金", "2884.TW": "玉山金",
+    "3037.TW": "欣興", "2379.TW": "瑞昱", "3711.TW": "日月光投控", "2303.TW": "聯電",
+    "1301.TW": "台塑", "1303.TW": "南亞", "1326.TW": "化纖", "2002.TW": "中鋼",
+    "00878.TW": "國泰永續高股息", "0050.TW": "元大台灣50", "0056.TW": "元大高股息", "00881.TW": "國泰台灣5G+",
+    "5351.TWO": "鈺創", "3264.TW": "欣銓", "6182.TW": "合晶", "5483.TWO": "中美晶"
 }
 
-# --- 初始化 Session State (記憶自選股清單) ---
+# --- 初始化 Session State ---
 if 'watchlist' not in st.session_state:
-    st.session_state.watchlist = ["2330.TW", "2317.TW", "2454.TW", "00878.TW", "00881.TW"]
+    st.session_state.watchlist = list(STOCK_POOL.keys())
 
 if 'primary_ticker' not in st.session_state:
     st.session_state.primary_ticker = "2330.TW"
 
 # --- 側邊欄：功能選單與設定 ---
-st.sidebar.header("🔍 股票查詢與自選股")
+st.sidebar.header("🔍 股票查詢與智慧篩選")
 
+# 1. 獨立的代號新增輸入框與按鈕
 col_input, col_btn = st.sidebar.columns([3, 1])
 with col_input:
-    new_ticker_input = st.text_input("新增自選代號", placeholder="例如: 2308, 5351, 2603", label_visibility="collapsed")
+    new_ticker_input = st.text_input("新增自選代號", placeholder="例如: 2308, 5351", label_visibility="collapsed")
 with col_btn:
     add_clicked = st.button("➕ 新增", use_container_width=True)
 
@@ -78,6 +75,11 @@ period_map = {
     "2年": "2y",
     "5年": "5y"
 }
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🚀 智慧飆股掃描器")
+st.sidebar.markdown("尋找 **OBV向上突破OBV9日均線** 且 **收盤價站上10日均線** 的個股。")
+scan_button = st.sidebar.button("開始掃描強勢成交量個股", use_container_width=True)
 
 # --- 資料抓取與技術指標計算函數 ---
 @st.cache_data(ttl=300, show_spinner=False)
@@ -127,7 +129,38 @@ def load_stock_data(symbol, period):
 
     return df, info, valid_symbol
 
-# 載入股票資料
+# --- 智慧掃描彈出或展開畫面 ---
+if scan_button:
+    st.markdown("## 🔍 盤後強勢量價齊揚股票掃描結果")
+    with st.spinner("正在掃描股票池中的 OBV 與 10日均線交疊向上狀態..."):
+        matched_stocks = []
+        progress_bar = st.progress(0)
+        total_stocks = len(STOCK_POOL)
+        
+        for idx, (sym, cname) in enumerate(STOCK_POOL.items()):
+            try:
+                temp_df, _, _ = load_stock_data(sym, "3mo")
+                if temp_df is not None and len(temp_df) > 10:
+                    last = temp_df.iloc[-1]
+                    # 條件：收盤價 > MA10 且 OBV >= OBV_MA9
+                    if last['Close'] > last['MA10'] and last['OBV'] >= last['OBV_MA9']:
+                        matched_stocks.append({"代號": sym, "名稱": cname, "收盤價": round(last['Close'], 2), "RSV": round(last['RSV'], 1)})
+            except:
+                pass
+            progress_bar.progress((idx + 1) / total_stocks)
+        
+        progress_bar.empty()
+        
+        if matched_stocks:
+            st.success(f"掃描完成！共找到 {len(matched_stocks)} 檔符合「量價齊揚 (OBV向上交叉 + 站上10日線)」的潛力股：")
+            df_matched = pd.DataFrame(matched_stocks)
+            st.dataframe(df_matched, use_container_width=True)
+            st.info("💡 提示：您可以從左側選單切換代號來查看這些潛力股的詳細 K 線與布林軌道！")
+        else:
+            st.warning("目前清單中沒有完全符合條件的股票（可能近期大盤震盪，量能未全面翻多）。")
+    st.markdown("---")
+
+# 載入當前選擇的股票資料
 with st.spinner(f"正在從 Yahoo 股市載入 {primary_ticker} 資料與計算指標..."):
     df, stock_info, actual_symbol = load_stock_data(primary_ticker, period_map[period_option])
 
@@ -135,9 +168,9 @@ with st.spinner(f"正在從 Yahoo 股市載入 {primary_ticker} 資料與計算�
 st.title("📊 台股盤後分析與技術指標系統")
 
 if df is None or df.empty:
-    st.error(f"找不到代號 `{primary_ticker}` 的資料。請確認台股代號是否正確（例如：上市請輸入 `2330` 或 `2330.TW`，上櫃請輸入 `5351` 或 `5351.TWO`）。")
+    st.error(f"找不到代號 `{primary_ticker}` 的資料。請確認台股代號是否正確。")
 else:
-    chinese_name = STOCK_NAME_MAP.get(actual_symbol)
+    chinese_name = STOCK_POOL.get(actual_symbol)
     if not chinese_name and stock_info:
         chinese_name = stock_info.get('chineseName', stock_info.get('shortName', actual_symbol))
     if not chinese_name:
@@ -186,7 +219,6 @@ else:
 
     st.markdown("---")
 
-    # 將 OBV 轉換為「萬」單位字串
     obv_str = f"{latest['OBV'] / 10000:,.1f}萬"
     obv_ma9_val = latest['OBV_MA9']
     obv_ma9_str = f"{obv_ma9_val / 10000:,.1f}萬" if not pd.isna(obv_ma9_val) else "0萬"
@@ -232,7 +264,7 @@ else:
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- 數據明細表 (將 OBV 數值轉換為「萬」單位，方便閱讀) ---
+    # --- 數據明細表 ---
     st.subheader(f"📋 近期技術指標與交易數據明細")
     
     df_table = df.copy()

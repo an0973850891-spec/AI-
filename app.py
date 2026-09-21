@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 擴充台股熱門掃描標的池 (涵蓋權值、熱門電子、傳產、金融、中小型強勢股) ---
+# --- 擴充台股熱門掃描標的池 ---
 STOCK_POOL = {
     "2330.TW": "台積電", "2317.TW": "鴻海", "2454.TW": "聯發科", "2308.TW": "台達電",
     "2382.TW": "廣達", "3231.TW": "緯創", "2356.TW": "英業達", "6669.TW": "緯穎",
@@ -121,20 +121,16 @@ def load_stock_data(symbol, period):
     if df is None or df.empty:
         return None, None, valid_symbol
 
-    # 將成交量轉換為「張」
     df['Volume_Zhang'] = df['Volume'] / 1000
 
-    # 技術指標計算
     df['MA10'] = df['Close'].rolling(window=10).mean()
     df['MA20'] = df['Close'].rolling(window=20).mean()
     df['STD'] = df['Close'].rolling(window=20).std()
     df['Upper'] = df['MA20'] + (df['STD'] * 2)
     df['Lower'] = df['MA20'] - (df['STD'] * 2)
 
-    # 近20日最高價（平台/前高）
     df['High_20'] = df['High'].shift(1).rolling(window=20).max()
 
-    # OBV 能量潮
     df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume_Zhang']).fillna(0).cumsum()
     df['OBV_MA9'] = df['OBV'].rolling(window=9).mean()
 
@@ -158,13 +154,9 @@ if scan_button:
                 temp_df, _, _ = load_stock_data(sym, "3mo")
                 if temp_df is not None and len(temp_df) > 20:
                     last = temp_df.iloc[-1]
-                    prev = temp_df.iloc[-2]
                     
-                    # 條件1：流動性成交量 >= 1000張
                     cond_volume = last['Volume_Zhang'] >= 1000
-                    # 條件2：OBV 向上交叉或維持在 OBV_MA9 之上，且收盤價站上 10日均線
                     cond_obv_ma = (last['Close'] > last['MA10']) and (last['OBV'] >= last['OBV_MA9'])
-                    # 條件3 & 4：當日收紅K (Close > Open) 且 突破近20日平台前高 (Close > High_20) 或 前一日屬放量強勢
                     is_red_k = last['Close'] > last['Open']
                     is_breakout = last['Close'] >= last['High_20']
                     
@@ -217,34 +209,41 @@ else:
     change = latest['Close'] - prev_close
     pct_change = (change / prev_close) * 100 if prev_close != 0 else 0
 
-    # --- 走勢支撐與壓力自動計算 ---
-    support_1 = latest['Lower']  # 布林下軌作為強支撐
-    support_2 = latest['MA10']   # 10日均線作為短線支撐
-    resistance_1 = latest['Upper'] # 布林上軌作為壓力
-    resistance_2 = df['High'].rolling(20).max().iloc[-1] # 近20日高點作為重大壓力
+    # 走勢支撐與壓力計算
+    support_1 = latest['Lower']
+    support_2 = latest['MA10']
+    resistance_1 = latest['Upper']
+    resistance_2 = df['High'].rolling(20).max().iloc[-1]
+    current_price = latest['Close']
 
-    # --- AI 燈號短中長線判讀邏輯 ---
+    # 燈號判讀
     short_signal = "🟡 中立盤整"
-    if latest['Close'] > latest['MA10'] and latest['RSV'] > 50:
+    if current_price > latest['MA10'] and latest['RSV'] > 50:
         short_signal = "🟢 短線偏多"
-    elif latest['Close'] < latest['MA10'] and latest['RSV'] < 50:
+    elif current_price < latest['MA10'] and latest['RSV'] < 50:
         short_signal = "🔴 短線偏空"
 
     long_signal = "🟡 盤整觀望"
     obv_val = latest['OBV']
     obv_ma9 = latest['OBV_MA9'] if not pd.isna(latest['OBV_MA9']) else obv_val
-    if latest['Close'] > latest['MA20'] and obv_val >= obv_ma9:
+    if current_price > latest['MA20'] and obv_val >= obv_ma9:
         long_signal = "🟢 中長線多頭"
-    elif latest['Close'] < latest['MA20'] and obv_val < obv_ma9:
+    elif current_price < latest['MA20'] and obv_val < obv_ma9:
         long_signal = "🔴 中長線空頭"
 
-    # --- AI 操作建議生成邏輯 ---
+    # --- 操盤解說：入手價與短中長期策略運算 ---
     if "偏多" in short_signal and "多頭" in long_signal:
-        advice = f"🚀 **強勢多頭格局**：資金持續流入（OBV向上），短中線動能俱佳。短線支撐看 **10日線 ({support_2:.2f})**，上方壓力看 **前高與布林上軌 ({resistance_1:.2f})**。拉回不破均線可偏多操作。"
+        entry_price = f"約 **{support_2:.2f} ~ {current_price:.2f} 元**（貼近 10 日均線附近或強勢整理區間分批承接）"
+        short_term_strategy = f"短線動能強勢，上檔直指前高壓力 **{resistance_2:.2f} 元**。若量能續強可續抱，守穩 10 日線不破短多格局不變。"
+        long_term_strategy = f"中長線資金持續流入（OBV向上且站穩布林中軌）。波段目標可看布林上軌 **{resistance_1:.2f} 元** 以上，中期防守點可設在布林中軌（MA20）。"
     elif "偏空" in short_signal and "空頭" in long_signal:
-        advice = f"⚠️ **弱勢空頭格局**：量能流出且跌破關鍵均線。短線反彈壓力重重，若跌破近期支撐 **({support_1:.2f})** 應嚴格停損，不宜躁進摸底。"
+        entry_price = f"暫不建議積極進場，若欲搶短需等待量縮止跌或回測強支撐 **{support_1:.2f} 元** 附近再觀察。"
+        short_term_strategy = f"短線賣壓重，反彈若無法站回 10 日線 **({support_2:.2f})** 易受壓回測，短打宜嚴守停損。"
+        long_term_strategy = f"中長線偏空，能量潮（OBV）呈現流出。建議空手觀望或進行保守資產配置，避免躁進摸底。"
     else:
-        advice = f"🔍 **盤整震盪格局**：目前股價介於支撐 **({support_2:.2f})** 與壓力 **({resistance_1:.2f})** 之間。建議採取區間操作或靜待帶量突破平台再做決定。"
+        entry_price = f"建議於區間下緣 **{support_2:.2f} ~ {support_1:.2f} 元** 尋找低接機會，或等待突破再順勢操作。"
+        short_term_strategy = f"短線處於盤整震盪，上下空間有限，應避免追高殺低。"
+        long_term_strategy = f"中長線待成交量與方向明確化（帶量突破布林上軌或跌破支撐），再調整部位大小。"
 
     # 顯示主標題與名稱
     st.markdown(f"### 🎯 **{chinese_name}** `({actual_symbol})`")
@@ -253,7 +252,14 @@ else:
     col_light1.markdown(f"**短線燈號：** {short_signal}")
     col_light2.markdown(f"**中長線燈號：** {long_signal}")
 
-    st.info(f"💡 **AI 操作與支撐壓力解析**：{advice}")
+    # 新增：操盤解說專屬區塊
+    with st.expander("💡 **【AI 專業操盤解說與進出策略】**", expanded=True):
+        st.markdown(f"""
+- 📍 **建議入手價**：{entry_price}
+- ⚡ **短期策略**：{short_term_strategy}
+- 🌊 **中長期策略**：{long_term_strategy}
+        """)
+
     st.markdown(f"📍 **當前關鍵價位** | 短線支撐：`{support_2:.2f}`元 | 強力支撐(布林下軌)：`{support_1:.2f}`元 | 上檔壓力(布林上軌)：`{resistance_1:.2f}`元 | 前高壓力：`{resistance_2:.2f}`元")
 
     st.markdown("---")
@@ -263,7 +269,7 @@ else:
     obv_ma9_str = f"{obv_ma9_val / 10000:,.1f}萬張" if not pd.isna(obv_ma9_val) else "0萬張"
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("最新收盤價", f"{latest['Close']:.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
+    col1.metric("最新收盤價", f"{current_price:.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
     col2.metric("成交量", f"{int(latest['Volume_Zhang']):,} 張")
     col3.metric("RSV (9日)", f"{latest['RSV']:.2f}%")
     col4.metric("OBV / OBV_MA9", f"{obv_str} / {obv_ma9_str}")

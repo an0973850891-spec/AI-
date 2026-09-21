@@ -78,7 +78,8 @@ def load_stock_data(symbol, period):
             return None, None
         
         # --- 計算技術指標 ---
-        # 1. 布林通道 (Bollinger Bands)
+        # 1. 價格均線 (MA10, MA20) 與 布林通道
+        df['MA10'] = df['Close'].rolling(window=10).mean()
         df['MA20'] = df['Close'].rolling(window=20).mean()
         df['STD'] = df['Close'].rolling(window=20).std()
         df['Upper'] = df['MA20'] + (df['STD'] * 2)
@@ -124,8 +125,8 @@ else:
     col3.metric("RSV (9日)", f"{latest['RSV']:.2f}%")
     col4.metric("OBV / OBV_MA9", f"{int(latest['OBV']):,} / {int(latest['OBV_MA9']) if not pd.isna(latest['OBV_MA9']) else 0:,}")
 
-    # --- 頁面配置 (直接上下排列，不需多股比較分頁) ---
-    st.subheader(f"📈 技術線圖 (K線 + 布林軌道 + 成交量 + OBV 雙線)")
+    # --- 技術線圖繪製 ---
+    st.subheader(f"📈 技術線圖 (K線 + 10日均線 + 布林軌道 + 成交量 + OBV 雙線)")
     
     fig = make_subplots(
         rows=3, cols=1, 
@@ -134,13 +135,15 @@ else:
         row_heights=[0.55, 0.22, 0.22]
     )
 
-    # 1. K線
+    # 1. K線與 10日均線、布林通道
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         name='K線', increasing_line_color='#ef5350', decreasing_line_color='#26a69a'
     ), row=1, col=1)
 
-    # 布林通道上下軌
+    # 新增 10日均線 (MA10)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA10'], name='10日均線 (MA10)', line=dict(color='orange', width=1.5)), row=1, col=1)
+    # 布林通道上下軌與中軌
     fig.add_trace(go.Scatter(x=df.index, y=df['Upper'], name='布林上軌', line=dict(color='rgba(250, 128, 114, 0.8)', width=1)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name='布林中軌 (MA20)', line=dict(color='rgba(30, 144, 255, 0.8)', width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['Lower'], name='布林下軌', line=dict(color='rgba(144, 238, 144, 0.8)', width=1), fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)'), row=1, col=1)
@@ -149,7 +152,7 @@ else:
     colors = ['#ef5350' if row['Close'] >= row['Open'] else '#26a69a' for index, row in df.iterrows()]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker_color=colors), row=2, col=1)
 
-    # 3. OBV 雙線
+    # 3. OBV 雙線指標
     fig.add_trace(go.Scatter(x=df.index, y=df['OBV'], name='OBV 能量潮', line=dict(color='#ab63fa', width=1.5)), row=3, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['OBV_MA9'], name='OBV 9日均線', line=dict(color='#ffa15a', width=1.2, dash='dot')), row=3, col=1)
 
@@ -164,11 +167,13 @@ else:
 
     # --- 數據明細表 ---
     st.subheader(f"📋 近期技術指標與交易數據明細")
-    display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA20', 'Upper', 'Lower', 'OBV', 'OBV_MA9', 'RSV'] if c in df.columns]
+    display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA10', 'MA20', 'Upper', 'Lower', 'OBV', 'OBV_MA9', 'RSV'] if c in df.columns]
     df_display = df[display_cols].copy()
     if 'RSV' in df_display.columns:
         df_display['RSV'] = df_display['RSV'].round(2)
     if 'OBV_MA9' in df_display.columns:
         df_display['OBV_MA9'] = df_display['OBV_MA9'].round(0)
-    
+    if 'MA10' in df_display.columns:
+        df_display['MA10'] = df_display['MA10'].round(2)
+        
     st.dataframe(df_display.tail(20).sort_index(ascending=False), use_container_width=True)

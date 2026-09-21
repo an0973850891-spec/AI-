@@ -7,24 +7,27 @@ from plotly.subplots import make_subplots
 
 # --- 頁面設定 ---
 st.set_page_config(
-    page_title="台股盤後與技術指標分析系統",
+    page_title="台股盤後與智慧量價掃描系統",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- 常見台股中文名稱與代號對照池 ---
+# --- 擴充台股熱門掃描標的池 (涵蓋權值、熱門電子、傳產、金融、中小型強勢股) ---
 STOCK_POOL = {
     "2330.TW": "台積電", "2317.TW": "鴻海", "2454.TW": "聯發科", "2308.TW": "台達電",
-    "2382.TW": "廣達", "2603.TW": "長榮", "2609.TW": "陽明", "2615.TW": "萬海",
+    "2382.TW": "廣達", "3231.TW": "緯創", "2356.TW": "英業達", "6669.TW": "緯穎",
+    "2603.TW": "長榮", "2609.TW": "陽明", "2615.TW": "萬海", "2618.TW": "長榮航",
     "2881.TW": "富邦金", "2882.TW": "國泰金", "2891.TW": "中信金", "2884.TW": "玉山金",
     "3037.TW": "欣興", "2379.TW": "瑞昱", "3711.TW": "日月光投控", "2303.TW": "聯電",
-    "1301.TW": "台塑", "1303.TW": "南亞", "1326.TW": "化纖", "2002.TW": "中鋼",
-    "00878.TW": "國泰永續高股息", "0050.TW": "元大台灣50", "0056.TW": "元大高股息", "00881.TW": "國泰台灣5G+",
+    "3017.TW": "奇鋐", "8210.TW": "勤誠", "2421.TW": "建準", "3661.TW": "世芯-KY",
+    "3529.TW": "力旺", "1513.TW": "中興電", "1519.TW": "華城", "1605.TW": "華新",
+    "1301.TW": "台塑", "1303.TW": "南亞", "2002.TW": "中鋼", "00878.TW": "國泰永續高股息",
+    "0050.TW": "元大台灣50", "0056.TW": "元大高股息", "00881.TW": "國泰台灣5G+",
     "5351.TWO": "鈺創", "3264.TWO": "欣銓", "6182.TWO": "合晶", "5483.TWO": "中美晶"
 }
 
-# --- 初始化 Session State (記憶自選股與篩選結果) ---
+# --- 初始化 Session State ---
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = list(STOCK_POOL.keys())
 
@@ -35,9 +38,8 @@ if 'scan_results' not in st.session_state:
     st.session_state.scan_results = None
 
 # --- 側邊欄：功能選單與設定 ---
-st.sidebar.header("🔍 股票查詢與智慧篩選")
+st.sidebar.header("🔍 股票查詢與進階篩選")
 
-# 1. 獨立的代號新增輸入框與按鈕
 col_input, col_btn = st.sidebar.columns([3, 1])
 with col_input:
     new_ticker_input = st.text_input("新增自選代號", placeholder="例如: 2308, 5351", label_visibility="collapsed")
@@ -80,9 +82,14 @@ period_map = {
 }
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🚀 智慧飆股掃描器")
-st.sidebar.markdown("尋找 **OBV向上突破OBV9日均線** 且 **收盤價站上10日均線** 的個股。")
-scan_button = st.sidebar.button("開始掃描強勢成交量個股", use_container_width=True)
+st.sidebar.subheader("🚀 專業進階選股掃描器")
+st.sidebar.markdown("""
+**篩選條件：**
+1. 🌊 **流動性**：成交量 $\ge$ 1,000 張
+2. 📈 **動能**：OBV向上交叉 + 站上10日線
+3. 🎯 **型態**：當日收紅K 突破近20日平台前高
+""")
+scan_button = st.sidebar.button("開始多條件智慧掃描", use_container_width=True)
 
 # --- 資料抓取與技術指標計算函數 ---
 @st.cache_data(ttl=300, show_spinner=False)
@@ -114,7 +121,7 @@ def load_stock_data(symbol, period):
     if df is None or df.empty:
         return None, None, valid_symbol
 
-    # 將成交量從「股」轉換為「張」 (1張 = 1000股)
+    # 將成交量轉換為「張」
     df['Volume_Zhang'] = df['Volume'] / 1000
 
     # 技術指標計算
@@ -124,7 +131,10 @@ def load_stock_data(symbol, period):
     df['Upper'] = df['MA20'] + (df['STD'] * 2)
     df['Lower'] = df['MA20'] - (df['STD'] * 2)
 
-    # OBV 改以張數的累積計算
+    # 近20日最高價（平台/前高）
+    df['High_20'] = df['High'].shift(1).rolling(window=20).max()
+
+    # OBV 能量潮
     df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume_Zhang']).fillna(0).cumsum()
     df['OBV_MA9'] = df['OBV'].rolling(window=9).mean()
 
@@ -136,9 +146,9 @@ def load_stock_data(symbol, period):
 
     return df, info, valid_symbol
 
-# --- 執行掃描並存入 session_state ---
+# --- 執行多條件智慧掃描 ---
 if scan_button:
-    with st.spinner("正在掃描股票池中的 OBV 與 10日均線交疊向上狀態..."):
+    with st.spinner("正在執行多條件深度掃描（流動性、OBV、10日線、紅K突破前高）..."):
         matched_stocks = []
         progress_bar = st.progress(0)
         total_stocks = len(STOCK_POOL)
@@ -146,16 +156,26 @@ if scan_button:
         for idx, (sym, cname) in enumerate(STOCK_POOL.items()):
             try:
                 temp_df, _, _ = load_stock_data(sym, "3mo")
-                if temp_df is not None and len(temp_df) > 10:
+                if temp_df is not None and len(temp_df) > 20:
                     last = temp_df.iloc[-1]
-                    # 已修正：使用英文 and 替代 &&
-                    if last['Close'] > last['MA10'] and last['OBV'] >= last['OBV_MA9']:
+                    prev = temp_df.iloc[-2]
+                    
+                    # 條件1：流動性成交量 >= 1000張
+                    cond_volume = last['Volume_Zhang'] >= 1000
+                    # 條件2：OBV 向上交叉或維持在 OBV_MA9 之上，且收盤價站上 10日均線
+                    cond_obv_ma = (last['Close'] > last['MA10']) and (last['OBV'] >= last['OBV_MA9'])
+                    # 條件3 & 4：當日收紅K (Close > Open) 且 突破近20日平台前高 (Close > High_20) 或 前一日屬放量強勢
+                    is_red_k = last['Close'] > last['Open']
+                    is_breakout = last['Close'] >= last['High_20']
+                    
+                    if cond_volume and cond_obv_ma and is_red_k and is_breakout:
                         matched_stocks.append({
                             "代號": sym, 
                             "名稱": cname, 
                             "收盤價": round(last['Close'], 2), 
                             "成交量(張)": int(last['Volume_Zhang']), 
-                            "RSV": round(last['RSV'], 1)
+                            "RSV": round(last['RSV'], 1),
+                            "突破型態": "🔥 紅K突破前高"
                         })
             except:
                 pass
@@ -164,23 +184,23 @@ if scan_button:
         progress_bar.empty()
         st.session_state.scan_results = matched_stocks
 
-# --- 主畫面：顯示持久化的掃描結果 ---
+# --- 主畫面：顯示掃描結果 ---
 if st.session_state.scan_results is not None:
-    st.markdown("## 🔍 盤後強勢量價齊揚股票掃描結果")
+    st.markdown("## 🚀 專業多條件選股掃描結果（流動性 + OBV + 10日線 + 突破前高）")
     if len(st.session_state.scan_results) > 0:
-        st.success(f"共找到 {len(st.session_state.scan_results)} 檔符合「量價齊揚 (OBV向上交叉 + 站上10日線)」的潛力股：")
+        st.success(f"共找到 {len(st.session_state.scan_results)} 檔符合嚴格多頭突破條件的強勢標的：")
         df_matched = pd.DataFrame(st.session_state.scan_results)
         st.dataframe(df_matched, use_container_width=True)
-        st.info("💡 提示：掃描結果已固定保留，您可以隨時從左側選單切換代號來查看這些潛力股的詳細 K 線圖與技術指標！")
+        st.info("💡 提示：點擊左側選單切換代號，即可直接檢視這些突破股的支撐壓力與技術線圖！")
     else:
-        st.warning("目前清單中沒有完全符合條件的股票。")
+        st.warning("目前清單中沒有完全符合「成交量1000張以上 + 站上10日線 + OBV向上 + 紅K突破20日高點」的個股。")
     st.markdown("---")
 
 # 載入當前選擇的股票資料
 with st.spinner(f"正在從 Yahoo 股市載入 {primary_ticker} 資料與計算指標..."):
     df, stock_info, actual_symbol = load_stock_data(primary_ticker, period_map[period_option])
 
-# --- 主畫面標題與中文名稱解析 ---
+# --- 主畫面標題與技術分析呈現 ---
 st.title("📊 台股盤後分析與技術指標系統")
 
 if df is None or df.empty:
@@ -196,6 +216,12 @@ else:
     prev_close = df.iloc[-2]['Close'] if len(df) > 1 else latest['Open']
     change = latest['Close'] - prev_close
     pct_change = (change / prev_close) * 100 if prev_close != 0 else 0
+
+    # --- 走勢支撐與壓力自動計算 ---
+    support_1 = latest['Lower']  # 布林下軌作為強支撐
+    support_2 = latest['MA10']   # 10日均線作為短線支撐
+    resistance_1 = latest['Upper'] # 布林上軌作為壓力
+    resistance_2 = df['High'].rolling(20).max().iloc[-1] # 近20日高點作為重大壓力
 
     # --- AI 燈號短中長線判讀邏輯 ---
     short_signal = "🟡 中立盤整"
@@ -214,15 +240,11 @@ else:
 
     # --- AI 操作建議生成邏輯 ---
     if "偏多" in short_signal and "多頭" in long_signal:
-        advice = "🚀 **強勢多頭格局**：短中線動能皆強，資金持續流入（OBV向上）。操作上可沿 10 日均線偏多操作，若回測布林中軌不破可視為尋找買點的時機，注意追高風險。"
+        advice = f"🚀 **強勢多頭格局**：資金持續流入（OBV向上），短中線動能俱佳。短線支撐看 **10日線 ({support_2:.2f})**，上方壓力看 **前高與布林上軌 ({resistance_1:.2f})**。拉回不破均線可偏多操作。"
     elif "偏空" in short_signal and "空頭" in long_signal:
-        advice = "⚠️ **弱勢空頭格局**：短中線均呈現回檔，賣壓較重且成交量能偏向流出。建議暫時多看少動、嚴守停損，避免過早逢低承接搶反彈。"
-    elif "偏空" in short_signal or "空頭" in long_signal:
-        advice = "防守為主：目前技術面呈現拉回或震盪偏空走勢，短期上檔逢壓。建議保持觀望，等待量能回穩、OBV突破均線後再行尋找介入機會。"
-    elif "偏多" in short_signal:
-        advice = "短線彈升：短線雖有買盤回溫跡象，但中長線仍在打底或盤整。操作上宜短打因應，嚴設停利停損，不宜過度重倉。"
+        advice = f"⚠️ **弱勢空頭格局**：量能流出且跌破關鍵均線。短線反彈壓力重重，若跌破近期支撐 **({support_1:.2f})** 應嚴格停損，不宜躁進摸底。"
     else:
-        advice = "🔍 **盤整觀望格局**：目前短中線指標交錯、方向不明確。建議靜待突破訊號（如帶量突破布林上軌或 OBV 翻揚向上）再擬定進場策略。"
+        advice = f"🔍 **盤整震盪格局**：目前股價介於支撐 **({support_2:.2f})** 與壓力 **({resistance_1:.2f})** 之間。建議採取區間操作或靜待帶量突破平台再做決定。"
 
     # 顯示主標題與名稱
     st.markdown(f"### 🎯 **{chinese_name}** `({actual_symbol})`")
@@ -231,7 +253,8 @@ else:
     col_light1.markdown(f"**短線燈號：** {short_signal}")
     col_light2.markdown(f"**中長線燈號：** {long_signal}")
 
-    st.info(f"💡 **AI 操作建議**：{advice}")
+    st.info(f"💡 **AI 操作與支撐壓力解析**：{advice}")
+    st.markdown(f"📍 **當前關鍵價位** | 短線支撐：`{support_2:.2f}`元 | 強力支撐(布林下軌)：`{support_1:.2f}`元 | 上檔壓力(布林上軌)：`{resistance_1:.2f}`元 | 前高壓力：`{resistance_2:.2f}`元")
 
     st.markdown("---")
 

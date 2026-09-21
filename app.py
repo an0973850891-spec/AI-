@@ -73,12 +73,10 @@ def load_stock_data(symbol, period):
 @st.cache_data(ttl=300, show_spinner=False)
 def load_multi_stock_data(symbols, period):
     try:
-        # 使用 yfinance 批次下載，設定 group_by 確保結構穩定
         data = yf.download(symbols, period=period, progress=False)
         if data is None or data.empty:
             return None
         
-        # 兼容 yfinance 不同版本的回傳格式
         if isinstance(data.columns, pd.MultiIndex):
             if 'Close' in data.columns.levels[0]:
                 df_close = data['Close']
@@ -149,10 +147,11 @@ else:
             name='K線', increasing_line_color='#ef5350', decreasing_line_color='#26a69a'
         ), row=1, col=1)
 
-        # 布林通道
+        # 布林通道上下軌
         fig.add_trace(go.Scatter(x=df.index, y=df['Upper'], name='布林上軌', line=dict(color='rgba(250, 128, 114, 0.8)', width=1)), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name='布林中軌 (MA20)', line=dict(color='rgba(30, 144, 255, 0.8)', width=1.5)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['Lower'], name='布林下軌', line=dict(color='rgba(144, 238, 144, 0.8)', width=1, fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)'), row=1, col=1), row=1, col=1)
+        # 已修正此處重複的 row/col 參數
+        fig.add_trace(go.Scatter(x=df.index, y=df['Lower'], name='布林下軌', line=dict(color='rgba(144, 238, 144, 0.8)', width=1), fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)'), row=1, col=1)
 
         # 成交量
         colors = ['#ef5350' if row['Close'] >= row['Open'] else '#26a69a' for index, row in df.iterrows()]
@@ -172,7 +171,6 @@ else:
         st.markdown("將所選股票在區間起点的價格視為 **0%**，方便直觀比較強弱勢表現。")
 
         if df_multi is not None and not df_multi.empty:
-            # 移除含有 NaN 的資料行並計算報酬率
             df_multi_clean = df_multi.dropna()
             if not df_multi_clean.empty:
                 df_pct = (df_multi_clean / df_multi_clean.iloc[0] - 1) * 100

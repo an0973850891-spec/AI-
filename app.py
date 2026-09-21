@@ -114,6 +114,9 @@ def load_stock_data(symbol, period):
     if df is None or df.empty:
         return None, None, valid_symbol
 
+    # 將成交量從「股」轉換為「張」 (1張 = 1000股)
+    df['Volume_Zhang'] = df['Volume'] / 1000
+
     # 技術指標計算
     df['MA10'] = df['Close'].rolling(window=10).mean()
     df['MA20'] = df['Close'].rolling(window=20).mean()
@@ -121,7 +124,8 @@ def load_stock_data(symbol, period):
     df['Upper'] = df['MA20'] + (df['STD'] * 2)
     df['Lower'] = df['MA20'] - (df['STD'] * 2)
 
-    df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
+    # OBV 改以張數的累積計算
+    df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume_Zhang']).fillna(0).cumsum()
     df['OBV_MA9'] = df['OBV'].rolling(window=9).mean()
 
     n = 9
@@ -144,8 +148,8 @@ if scan_button:
                 temp_df, _, _ = load_stock_data(sym, "3mo")
                 if temp_df is not None and len(temp_df) > 10:
                     last = temp_df.iloc[-1]
-                    if last['Close'] > last['MA10'] and last['OBV'] >= last['OBV_MA9']:
-                        matched_stocks.append({"代號": sym, "名稱": cname, "收盤價": round(last['Close'], 2), "RSV": round(last['RSV'], 1)})
+                    if last['Close'] > last['MA10'] && last['OBV'] >= last['OBV_MA9']:
+                        matched_stocks.append({"代號": sym, "名稱": cname, "收盤價": round(last['Close'], 2), "成交量(張)": int(last['Volume_Zhang']), "RSV": round(last['RSV'], 1)})
             except:
                 pass
             progress_bar.progress((idx + 1) / total_stocks)
@@ -224,13 +228,13 @@ else:
 
     st.markdown("---")
 
-    obv_str = f"{latest['OBV'] / 10000:,.1f}萬"
+    obv_str = f"{latest['OBV'] / 10000:,.1f}萬張"
     obv_ma9_val = latest['OBV_MA9']
-    obv_ma9_str = f"{obv_ma9_val / 10000:,.1f}萬" if not pd.isna(obv_ma9_val) else "0萬"
+    obv_ma9_str = f"{obv_ma9_val / 10000:,.1f}萬張" if not pd.isna(obv_ma9_val) else "0萬張"
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("最新收盤價", f"{latest['Close']:.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
-    col2.metric("成交量", f"{int(latest['Volume']):,}")
+    col2.metric("成交量", f"{int(latest['Volume_Zhang']):,} 張")
     col3.metric("RSV (9日)", f"{latest['RSV']:.2f}%")
     col4.metric("OBV / OBV_MA9", f"{obv_str} / {obv_ma9_str}")
 
@@ -255,7 +259,7 @@ else:
     fig.add_trace(go.Scatter(x=df.index, y=df['Lower'], name='布林下軌', line=dict(color='rgba(144, 238, 144, 0.8)', width=1), fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)'), row=1, col=1)
 
     colors = ['#ef5350' if row['Close'] >= row['Open'] else '#26a69a' for index, row in df.iterrows()]
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker_color=colors), row=2, col=1)
+    fig.add_trace(go.Bar(x=df.index, y=df['Volume_Zhang'], name='成交量(張)', marker_color=colors), row=2, col=1)
 
     fig.add_trace(go.Scatter(x=df.index, y=df['OBV'], name='OBV 能量潮', line=dict(color='#ab63fa', width=1.5)), row=3, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['OBV_MA9'], name='OBV 9日均線', line=dict(color='#ffa15a', width=1.2, dash='dot')), row=3, col=1)
@@ -273,6 +277,7 @@ else:
     st.subheader(f"📋 近期技術指標與交易數據明細")
     
     df_table = df.copy()
+    df_table['Volume_Zhang_Int'] = df_table['Volume_Zhang'].round(0).astype(int)
     df_table['OBV_Wan'] = (df_table['OBV'] / 10000).round(1)
     df_table['OBV_MA9_Wan'] = (df_table['OBV_MA9'] / 10000).round(1)
 
@@ -281,17 +286,17 @@ else:
         'High': '最高',
         'Low': '最低',
         'Close': '收盤',
-        'Volume': '成交量',
+        'Volume_Zhang_Int': '成交量(張)',
         'MA10': '10日均線',
         'MA20': '布林中軌(MA20)',
         'Upper': '布林上軌',
         'Lower': '布林下軌',
-        'OBV_Wan': 'OBV能量潮(萬)',
-        'OBV_MA9_Wan': 'OBV9日均線(萬)',
+        'OBV_Wan': 'OBV能量潮(萬張)',
+        'OBV_MA9_Wan': 'OBV9日均線(萬張)',
         'RSV': 'RSV(9日)'
     }
     
-    display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA10', 'MA20', 'Upper', 'Lower', 'OBV_Wan', 'OBV_MA9_Wan', 'RSV'] if c in df_table.columns]
+    display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume_Zhang_Int', 'MA10', 'MA20', 'Upper', 'Lower', 'OBV_Wan', 'OBV_MA9_Wan', 'RSV'] if c in df_table.columns]
     df_display = df_table[display_cols].copy()
     
     if 'RSV' in df_display.columns:

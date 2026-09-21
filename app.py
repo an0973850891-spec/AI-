@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 常見台股中文名稱對照表（確保中文名稱完美顯示） ---
+# --- 常見台股中文名稱對照表 ---
 STOCK_NAME_MAP = {
     "2330.TW": "台積電",
     "2317.TW": "鴻海",
@@ -137,7 +137,6 @@ st.title("📊 台股盤後分析與技術指標系統")
 if df is None or df.empty:
     st.error(f"找不到代號 `{primary_ticker}` 的資料。請確認台股代號是否正確（例如：上市請輸入 `2330` 或 `2330.TW`，上櫃請輸入 `5351` 或 `5351.TWO`）。")
 else:
-    # 取得中文名稱優先順序：對照表 -> Yahoo info 裡的 shortName/longName -> 代號本身
     chinese_name = STOCK_NAME_MAP.get(actual_symbol)
     if not chinese_name and stock_info:
         chinese_name = stock_info.get('chineseName', stock_info.get('shortName', actual_symbol))
@@ -150,14 +149,12 @@ else:
     pct_change = (change / prev_close) * 100 if prev_close != 0 else 0
 
     # --- AI 燈號短中長線判讀邏輯 ---
-    # 短線評估：結合最新收盤價與 10日均線、RSV
     short_signal = "🟡 中立盤整"
     if latest['Close'] > latest['MA10'] and latest['RSV'] > 50:
         short_signal = "🟢 短線偏多"
     elif latest['Close'] < latest['MA10'] and latest['RSV'] < 50:
         short_signal = "🔴 短線偏空"
 
-    # 中長線評估：結合 MA20 (布林中軌)、OBV 與 OBV 9日均線
     long_signal = "🟡 盤整觀望"
     obv_val = latest['OBV']
     obv_ma9 = latest['OBV_MA9'] if not pd.isna(latest['OBV_MA9']) else obv_val
@@ -169,14 +166,12 @@ else:
     # 顯示主標題與名稱
     st.markdown(f"### 🎯 **{chinese_name}** `({actual_symbol})`")
     
-    # 燈號提示列
     col_light1, col_light2, col_space = st.columns([2, 2, 6])
     col_light1.markdown(f"**短線燈號：** {short_signal}")
     col_light2.markdown(f"**中長線燈號：** {long_signal}")
 
     st.markdown("---")
 
-    # 數據看板
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("最新收盤價", f"{latest['Close']:.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
     col2.metric("成交量", f"{int(latest['Volume']):,}")
@@ -193,7 +188,6 @@ else:
         row_heights=[0.55, 0.22, 0.22]
     )
 
-    # 1. K線與 10日均線、布林通道
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         name='K線', increasing_line_color='#ef5350', decreasing_line_color='#26a69a'
@@ -204,11 +198,9 @@ else:
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name='布林中軌 (MA20)', line=dict(color='rgba(30, 144, 255, 0.8)', width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['Lower'], name='布林下軌', line=dict(color='rgba(144, 238, 144, 0.8)', width=1), fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)'), row=1, col=1)
 
-    # 2. 成交量
     colors = ['#ef5350' if row['Close'] >= row['Open'] else '#26a69a' for index, row in df.iterrows()]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker_color=colors), row=2, col=1)
 
-    # 3. OBV 雙線指標
     fig.add_trace(go.Scatter(x=df.index, y=df['OBV'], name='OBV 能量潮', line=dict(color='#ab63fa', width=1.5)), row=3, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['OBV_MA9'], name='OBV 9日均線', line=dict(color='#ffa15a', width=1.2, dash='dot')), row=3, col=1)
 
@@ -221,15 +213,45 @@ else:
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- 數據明細表 ---
+    # --- 數據明細表（完全中文化欄位） ---
     st.subheader(f"📋 近期技術指標與交易數據明細")
+    
+    # 重新命名欄位以便在表格中顯示中文
+    rename_dict = {
+        'Open': '開盤',
+        'High': '最高',
+        'Low': '最低',
+        'Close': '收盤',
+        'Volume': '成交量',
+        'MA10': '10日均線',
+        'MA20': '布林中軌(MA20)',
+        'Upper': '布林上軌',
+        'Lower': '布林下軌',
+        'OBV': 'OBV能量潮',
+        'OBV_MA9': 'OBV9日均線',
+        'RSV': 'RSV(9日)'
+    }
+    
     display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA10', 'MA20', 'Upper', 'Lower', 'OBV', 'OBV_MA9', 'RSV'] if c in df.columns]
     df_display = df[display_cols].copy()
+    
+    # 數值四捨五入
     if 'RSV' in df_display.columns:
         df_display['RSV'] = df_display['RSV'].round(2)
     if 'OBV_MA9' in df_display.columns:
         df_display['OBV_MA9'] = df_display['OBV_MA9'].round(0)
     if 'MA10' in df_display.columns:
         df_display['MA10'] = df_display['MA10'].round(2)
+    if 'MA20' in df_display.columns:
+        df_display['MA20'] = df_display['MA20'].round(2)
+    if 'Upper' in df_display.columns:
+        df_display['Upper'] = df_display['Upper'].round(2)
+    if 'Lower' in df_display.columns:
+        df_display['Lower'] = df_display['Lower'].round(2)
+
+    # 套用中文欄位名稱並將日期索引轉為乾淨的字串格式
+    df_display = df_display.rename(columns=rename_dict)
+    df_display.index = pd.to_datetime(df_display.index).strftime('%Y-%m-%d')
+    df_display.index.name = '日期'
         
     st.dataframe(df_display.tail(20).sort_index(ascending=False), use_container_width=True)

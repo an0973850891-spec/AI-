@@ -75,15 +75,14 @@ def load_stock_data(symbol, period):
         df['Upper'] = df['MA20'] + (df['STD'] * 2)
         df['Lower'] = df['MA20'] - (df['STD'] * 2)
 
-        # 2. OBV 能量潮指標 (On-Balance Volume)
-        # 當日收盤 > 昨日收盤，OBV + 成交量；收盤 < 昨日收盤，OBV - 成交量；相等則維持不變
+        # 2. OBV 能量潮指標與 OBV 均線 (MAOBV，預設 9 日)
         df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
+        df['OBV_MA9'] = df['OBV'].rolling(window=9).mean()
 
-        # 3. RSV 未成熟隨機值 (通常以 9 日為週期：(收盤 - 9日最低) / (9日最高 - 9日最低) * 100)
+        # 3. RSV 未成熟隨機值 (9日)
         n = 9
         low_min = df['Low'].rolling(window=n, min_periods=1).min()
         high_max = df['High'].rolling(window=n, min_periods=1).max()
-        # 避免分母為 0
         denominator = high_max - low_min
         df['RSV'] = np.where(denominator == 0, 50, (df['Close'] - low_min) / denominator * 100)
 
@@ -141,15 +140,15 @@ else:
     col1.metric("最新收盤價", f"{latest['Close']:.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
     col2.metric("成交量", f"{int(latest['Volume']):,}")
     col3.metric("RSV (9日)", f"{latest['RSV']:.2f}%")
-    col4.metric("OBV 能量潮", f"{int(latest['OBV']):,}")
+    col4.metric("OBV / OBV_MA9", f"{int(latest['OBV']):,} / {int(latest['OBV_MA9']) if not pd.isna(latest['OBV_MA9']) else 0:,}")
 
     # --- 分頁介面 ---
-    tab1, tab2, tab3 = st.tabs(["📈 K線、布林通道與 OBV", "📊 自選股多股走勢比較", "📋 技術指標與交易數據明細"])
+    tab1, tab2, tab3 = st.tabs(["📈 K線、布林通道與 OBV雙線", "📊 自選股多股走勢比較", "📋 技術指標與交易數據明細"])
 
     with tab1:
-        st.subheader(f"{primary_ticker} 技術線圖 (K線 + 布林軌道 + 成交量 + OBV)")
+        st.subheader(f"{primary_ticker} 技術線圖 (K線 + 布林軌道 + 成交量 + OBV 雙線)")
         
-        # 建立 3 個子圖表：上圖(K線與布林)，中圖(成交量)，下圖(OBV)
+        # 建立 3 個子圖表：上圖(K線與布林)，中圖(成交量)，下圖(OBV 雙線)
         fig = make_subplots(
             rows=3, cols=1, 
             shared_xaxes=True, 
@@ -172,10 +171,14 @@ else:
         colors = ['#ef5350' if row['Close'] >= row['Open'] else '#26a69a' for index, row in df.iterrows()]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='成交量', marker_color=colors), row=2, col=1)
 
-        # 3. OBV 能量潮指標
+        # 3. OBV 能量潮指標（雙線：OBV 本線與 OBV 9日均線）
         fig.add_trace(go.Scatter(
             x=df.index, y=df['OBV'], name='OBV 能量潮', 
             line=dict(color='#ab63fa', width=1.5)
+        ), row=3, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['OBV_MA9'], name='OBV 9日均線', 
+            line=dict(color='#ffa15a', width=1.2, dash='dot')
         ), row=3, col=1)
 
         fig.update_layout(
@@ -222,10 +225,11 @@ else:
 
     with tab3:
         st.subheader(f"📋 {primary_ticker} 近期技術指標與交易數據明細")
-        display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA20', 'Upper', 'Lower', 'OBV', 'RSV'] if c in df.columns]
-        # 將數值稍微格式化方便閱讀
+        display_cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume', 'MA20', 'Upper', 'Lower', 'OBV', 'OBV_MA9', 'RSV'] if c in df.columns]
         df_display = df[display_cols].copy()
         if 'RSV' in df_display.columns:
             df_display['RSV'] = df_display['RSV'].round(2)
+        if 'OBV_MA9' in df_display.columns:
+            df_display['OBV_MA9'] = df_display['OBV_MA9'].round(0)
         
         st.dataframe(df_display.tail(20).sort_index(ascending=False), use_container_width=True)
